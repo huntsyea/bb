@@ -263,6 +263,15 @@ export interface ThreadSecondaryPanelProps {
    * Defaults to the standalone surface's stable id.
    */
   resizablePanelId?: string;
+  /**
+   * Host-owned placement when this panel participates in a movable Thread
+   * layout. Omission means the panel uses its standalone trailing placement.
+   */
+  resizablePanelLayout?: {
+    panelOrder: number;
+    resizeHandleVisualOrder: number;
+    visualOrder: number;
+  };
   onPanelFocus: () => void;
   /** Reports the panel's live percentage while it resizes. */
   onPanelResize?: (sizePercent: number) => void;
@@ -341,6 +350,7 @@ export function ThreadSecondaryPanel({
   showNewTabButton = true,
   inlinePanelToggle = "button",
   resizablePanelId = "thread-detail-secondary-panel",
+  resizablePanelLayout,
   onPanelFocus,
   onPanelResize,
   onPanelChange,
@@ -851,6 +861,7 @@ export function ThreadSecondaryPanel({
         isConversationCollapsed={isConversationCollapsed}
         matchesSplitDividers={hostLayout !== null}
         onDragging={handleSecondaryPanelDragging}
+        visualOrder={resizablePanelLayout?.resizeHandleVisualOrder}
       />
       <Panel
         ref={resizablePanelRef}
@@ -873,8 +884,11 @@ export function ThreadSecondaryPanel({
         onCollapse={handlePanelCollapse}
         onResize={handlePanelResize}
         onTransitionEnd={handlePanelTransitionEnd}
-        order={2}
-        style={SECONDARY_RESIZABLE_PANEL_STYLE}
+        order={resizablePanelLayout?.panelOrder ?? 2}
+        style={{
+          ...SECONDARY_RESIZABLE_PANEL_STYLE,
+          order: resizablePanelLayout?.visualOrder,
+        }}
         className={cn(
           // `overflow-clip`, not `overflow-hidden`: while swiping, the held-width
           // content is wider than the animating panel, which makes an
@@ -991,6 +1005,7 @@ interface SecondaryPanelResizeHandleProps {
    */
   matchesSplitDividers: boolean;
   onDragging: SecondaryPanelDraggingHandler;
+  visualOrder?: number;
 }
 
 function SecondaryPanelResizeHandle({
@@ -998,6 +1013,7 @@ function SecondaryPanelResizeHandle({
   isConversationCollapsed,
   matchesSplitDividers,
   onDragging,
+  visualOrder,
 }: SecondaryPanelResizeHandleProps) {
   const isResizing = useAtomValue(threadSecondaryPanelResizingAtom);
   return (
@@ -1009,6 +1025,7 @@ function SecondaryPanelResizeHandle({
       disabled={!isOpen || isConversationCollapsed}
       onDragging={onDragging}
       hitAreaMargins={PANEL_RESIZE_HIT_AREA_MARGINS}
+      style={{ order: visualOrder }}
       className={cn(
         "group relative shrink-0 overflow-visible transition-[width,opacity,background-color]",
         PANEL_RESIZE_HANDLE_LAYER_CLASS,

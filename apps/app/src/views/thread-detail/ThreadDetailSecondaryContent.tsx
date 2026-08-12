@@ -1,4 +1,5 @@
 import {
+  cloneElement,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -43,6 +44,7 @@ import {
   PluginComposerHostScopeProvider,
   usePluginComposerHost,
 } from "@/components/plugin/plugin-composer-host";
+import { ThreadSurfaceHost } from "./ThreadSurfaceHost";
 
 const CLOSED_TIMELINE_PANEL_SIZE_PERCENT = 100;
 const COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT = 0;
@@ -402,41 +404,56 @@ function ThreadDetailSecondaryContentBody({
           // place. `clip` makes it a non-scroll container.
           style={{ overflow: "clip" }}
         >
-          <Panel
-            id="thread-detail-timeline-panel"
-            collapsible
-            collapsedSize={COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT}
-            defaultSize={
-              isConversationCollapsedActive
-                ? COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT
-                : isSecondaryPanelOpen && !renderAsDrawer
-                  ? 100 - persistedSecondaryWidthPercent
-                  : CLOSED_TIMELINE_PANEL_SIZE_PERCENT
-            }
-            minSize={TIMELINE_PANEL_MIN_SIZE_PERCENT}
-            order={1}
-            className={cn(
-              "min-w-0 overflow-clip transition-[flex-grow,flex-basis]",
-              PANEL_COLLAPSE_TRANSITION_CLASS,
+          <ThreadSurfaceHost
+            arrangement="conversation-primary"
+            renderConversation={(layout) => (
+              <Panel
+                id="thread-detail-timeline-panel"
+                collapsible
+                collapsedSize={COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT}
+                defaultSize={
+                  isConversationCollapsedActive
+                    ? COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT
+                    : isSecondaryPanelOpen && !renderAsDrawer
+                      ? 100 - persistedSecondaryWidthPercent
+                      : CLOSED_TIMELINE_PANEL_SIZE_PERCENT
+                }
+                minSize={TIMELINE_PANEL_MIN_SIZE_PERCENT}
+                order={layout.panelOrder}
+                style={{ order: layout.visualOrder }}
+                className={cn(
+                  "min-w-0 overflow-clip transition-[flex-grow,flex-basis]",
+                  PANEL_COLLAPSE_TRANSITION_CLASS,
+                )}
+              >
+                <div
+                  data-thread-region="conversation"
+                  data-conversation-collapsed={
+                    isConversationCollapsedActive
+                  }
+                  // `inert` removes the hidden conversation (header, timeline,
+                  // composer) from the tab order and a11y tree and blocks pointer
+                  // events, so keyboard focus can't land in the invisible pane.
+                  inert={isConversationCollapsedActive}
+                  className={cn(
+                    "flex h-full min-h-0 min-w-0 flex-col transition-opacity",
+                    PANEL_COLLAPSE_TRANSITION_CLASS,
+                    isConversationCollapsedActive && "opacity-0",
+                  )}
+                >
+                  {header}
+                  <ThreadTimelinePane {...stableTimeline} footer={footer} />
+                </div>
+              </Panel>
             )}
-          >
-            <div
-              data-conversation-collapsed={isConversationCollapsedActive}
-              // `inert` removes the hidden conversation (header, timeline,
-              // composer) from the tab order and a11y tree and blocks pointer
-              // events, so keyboard focus can't land in the invisible pane.
-              inert={isConversationCollapsedActive}
-              className={cn(
-                "flex h-full min-h-0 min-w-0 flex-col transition-opacity",
-                PANEL_COLLAPSE_TRANSITION_CLASS,
-                isConversationCollapsedActive && "opacity-0",
-              )}
-            >
-              {header}
-              <ThreadTimelinePane {...stableTimeline} footer={footer} />
-            </div>
-          </Panel>
-          {inlineSecondaryPanelContent}
+            renderWorkSurface={(layout) =>
+              inlineSecondaryPanelContent === null
+                ? null
+                : cloneElement(inlineSecondaryPanelContent, {
+                    resizablePanelLayout: layout,
+                  })
+            }
+          />
         </PanelGroup>
       </div>
       {renderAsDrawer ? (
