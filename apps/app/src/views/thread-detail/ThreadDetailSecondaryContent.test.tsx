@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
-import type { ComponentProps, ReactNode } from "react";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { dispatchBrowserViewBoundsSync } from "@/lib/browser-view-bounds-sync";
@@ -13,6 +19,7 @@ import {
   type PaneSecondaryPanelViewModel,
 } from "./PaneContext";
 import { MemoryRouter } from "react-router-dom";
+import type { ThreadSurfaceArrangement } from "./ThreadSurfaceHost";
 
 type ThreadDetailSecondaryContentProps = ComponentProps<
   typeof ThreadDetailSecondaryContent
@@ -66,8 +73,20 @@ vi.mock("react-resizable-panels", async () => {
   });
   PanelGroup.displayName = "MockPanelGroup";
 
-  const Panel = ({ children }: { children?: ReactNode }) =>
-    React.createElement("div", { "data-testid": "panel" }, children);
+  const Panel = ({
+    children,
+    order,
+    style,
+  }: {
+    children?: ReactNode;
+    order?: number;
+    style?: CSSProperties;
+  }) =>
+    React.createElement(
+      "div",
+      { "data-panel-order": order, "data-testid": "panel", style },
+      children,
+    );
 
   return { Panel, PanelGroup };
 });
@@ -139,18 +158,58 @@ vi.mock(
       inlinePanelToggle,
       isOpen,
       renderAsDrawer,
+      resizablePanelLayout,
     }: ComponentProps<typeof actual.ThreadSecondaryPanel>) =>
-      React.createElement(
+      React.createElement(StatefulSecondaryPanelFixture, {
+        browserDeck,
+        inlinePanelToggle,
+        isOpen,
+        renderAsDrawer,
+        resizablePanelLayout,
+      });
+
+    function StatefulSecondaryPanelFixture({
+      browserDeck,
+      inlinePanelToggle,
+      isOpen,
+      renderAsDrawer,
+      resizablePanelLayout,
+    }: Pick<
+      ComponentProps<typeof actual.ThreadSecondaryPanel>,
+      | "browserDeck"
+      | "inlinePanelToggle"
+      | "isOpen"
+      | "renderAsDrawer"
+      | "resizablePanelLayout"
+    >) {
+      const [activeResource, setActiveResource] = React.useState("notes.md");
+      return React.createElement(
         "section",
         {
           "data-open": String(isOpen),
           "data-inline-panel-toggle": inlinePanelToggle,
+          "data-panel-order": resizablePanelLayout?.panelOrder,
           "data-testid": renderAsDrawer
             ? "drawer-secondary-panel"
             : "inline-secondary-panel",
+          style: { order: resizablePanelLayout?.visualOrder },
         },
+        React.createElement(
+          "button",
+          {
+            onClick: () => setActiveResource("preview.pdf"),
+            type: "button",
+          },
+          "Open preview",
+        ),
+        React.createElement(
+          "div",
+          { "data-testid": "active-resource" },
+          activeResource,
+        ),
         browserDeck,
       );
+    }
 
     return { ...actual, ThreadSecondaryPanel };
   },
@@ -166,6 +225,7 @@ vi.mock("./ThreadTimelinePane", async (importOriginal) => {
     React.createElement("div", {
       "data-testid": "thread-timeline-pane",
       "data-thread-id": threadId,
+      tabIndex: -1,
     });
 
   return { ...actual, ThreadTimelinePane };
@@ -179,6 +239,7 @@ interface QueuedAnimationFrames {
 }
 
 interface RenderThreadDetailArgs {
+  arrangement?: ThreadSurfaceArrangement;
   isFocusedHosted?: boolean;
   isCompactViewport: boolean;
   isSecondaryPanelOpen: boolean;
@@ -312,7 +373,19 @@ function createBrowserDeckRenderer(order?: string[]): RenderBrowserDeck {
   });
 }
 
+function StatefulConversationHeader() {
+  return (
+    <div data-testid="header">
+      <label>
+        Draft
+        <input aria-label="Draft" defaultValue="unfinished prompt" />
+      </label>
+    </div>
+  );
+}
+
 function createProps({
+  arrangement = "conversation-primary",
   isSecondaryPanelOpen,
   renderBrowserDeck,
   threadId,
@@ -322,7 +395,7 @@ function createProps({
 >): ThreadDetailSecondaryContentProps {
   return {
     footer: <div data-testid="footer" />,
-    header: <div data-testid="header" />,
+    header: <StatefulConversationHeader />,
     isBoundedPane: false,
     isConversationCollapsed: false,
     isMetadataLoading: false,
@@ -369,6 +442,7 @@ function createProps({
       renderBrowserDeck,
       showGitDiffTab: false,
     },
+    surfaceArrangement: arrangement,
     timeline: {
       activeThinking: null,
       hasOlderTimelineRows: false,
@@ -400,6 +474,7 @@ function renderThreadDetail(args: RenderThreadDetailArgs) {
       >
         <ThreadDetailSecondaryContent
           {...createProps({
+            arrangement: renderArgs.arrangement,
             isSecondaryPanelOpen: renderArgs.isSecondaryPanelOpen,
             renderBrowserDeck: renderArgs.renderBrowserDeck,
             threadId: renderArgs.threadId,
@@ -422,6 +497,7 @@ function renderThreadDetail(args: RenderThreadDetailArgs) {
           >
             <ThreadDetailSecondaryContent
               {...createProps({
+                arrangement: renderArgs.arrangement,
                 isSecondaryPanelOpen: renderArgs.isSecondaryPanelOpen,
                 renderBrowserDeck: renderArgs.renderBrowserDeck,
                 threadId: renderArgs.threadId,
@@ -522,6 +598,66 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
     expect(timelinePanel.contains(sidePanel)).toBe(false);
     expect(panelGroup.contains(timelinePanel)).toBe(true);
     expect(panelGroup.contains(sidePanel)).toBe(true);
+  });
+
+  it("preserves real Thread region state and focus across host rearrangement", () => {
+    const view = renderThreadDetail({
+      arrangement: "conversation-primary",
+      isCompactViewport: false,
+      isSecondaryPanelOpen: true,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+    const conversation = screen
+      .getByTestId("thread-timeline-pane")
+      .closest('[data-thread-region="conversation"]');
+    const workSurface = screen.getByTestId("inline-secondary-panel");
+    const draft = screen.getByRole("textbox", { name: "Draft" });
+    const timeline = screen.getByTestId("thread-timeline-pane");
+
+    if (conversation === null) {
+      throw new Error("Expected the stable conversation region");
+    }
+    fireEvent.change(draft, { target: { value: "edited draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open preview" }));
+    timeline.scrollTop = 240;
+    draft.focus();
+
+    view.rerenderWith({ arrangement: "work-surface-primary" });
+
+    const preservedDraft = screen.getByRole("textbox", { name: "Draft" });
+    expect(screen.getAllByTestId("thread-timeline-pane")).toHaveLength(1);
+    expect(screen.getAllByTestId("inline-secondary-panel")).toHaveLength(1);
+    expect(
+      screen
+        .getByTestId("thread-timeline-pane")
+        .closest('[data-thread-region="conversation"]'),
+    ).toBe(conversation);
+    expect(screen.getByTestId("inline-secondary-panel")).toBe(workSurface);
+    expect(preservedDraft).toBeInstanceOf(HTMLInputElement);
+    if (!(preservedDraft instanceof HTMLInputElement)) {
+      throw new Error("Expected the draft control to be an input");
+    }
+    expect(preservedDraft.value).toBe("edited draft");
+    expect(screen.getByTestId("thread-timeline-pane").scrollTop).toBe(240);
+    expect(screen.getByTestId("active-resource").textContent).toBe(
+      "preview.pdf",
+    );
+    expect(document.activeElement).toBe(preservedDraft);
+    expect(screen.getByTestId("panel").style.order).toBe("3");
+    expect(screen.getByTestId("inline-secondary-panel").style.order).toBe(
+      "1",
+    );
+
+    view.rerenderWith({ arrangement: "conversation-primary" });
+
+    expect(
+      screen
+        .getByTestId("thread-timeline-pane")
+        .closest('[data-thread-region="conversation"]'),
+    ).toBe(conversation);
+    expect(screen.getByTestId("inline-secondary-panel")).toBe(workSurface);
+    expect(document.activeElement).toBe(preservedDraft);
   });
 
   it("hides and restores native browser readiness as hosted pane focus changes", () => {

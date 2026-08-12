@@ -2815,6 +2815,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
             onPanelChange: handleSecondaryPanelChange,
             showGitDiffTab: canUseGitUi,
           }}
+          surfaceArrangement="conversation-primary"
           timeline={{
             activeThinking,
             canSpawnChild: thread.canSpawnChild,

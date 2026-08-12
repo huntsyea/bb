@@ -44,7 +44,10 @@ import {
   PluginComposerHostScopeProvider,
   usePluginComposerHost,
 } from "@/components/plugin/plugin-composer-host";
-import { ThreadSurfaceHost } from "./ThreadSurfaceHost";
+import {
+  ThreadSurfaceHost,
+  type ThreadSurfaceArrangement,
+} from "./ThreadSurfaceHost";
 
 const CLOSED_TIMELINE_PANEL_SIZE_PERCENT = 100;
 const COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT = 0;
@@ -86,6 +89,7 @@ interface ThreadDetailSecondaryContentProps {
   renderHostedPanel: (panel: ReactNode) => ReactNode;
   metadata: ThreadMetadataContentProps;
   secondaryPanel: ThreadSecondaryPanelProps;
+  surfaceArrangement: ThreadSurfaceArrangement;
   timeline: ThreadTimelinePaneProps;
 }
 
@@ -111,6 +115,7 @@ function ThreadDetailSecondaryContentBody({
   renderHostedPanel,
   metadata,
   secondaryPanel,
+  surfaceArrangement,
   timeline,
 }: ThreadDetailSecondaryContentProps) {
   const { isFocused, paneId, secondaryPanelHost } = usePaneContext();
@@ -405,7 +410,7 @@ function ThreadDetailSecondaryContentBody({
           style={{ overflow: "clip" }}
         >
           <ThreadSurfaceHost
-            arrangement="conversation-primary"
+            arrangement={surfaceArrangement}
             renderConversation={(layout) => (
               <Panel
                 id="thread-detail-timeline-panel"
