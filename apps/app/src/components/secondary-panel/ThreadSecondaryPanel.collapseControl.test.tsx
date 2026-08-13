@@ -15,6 +15,8 @@ const noop = () => {};
 function renderPanel(args: {
   isConversationCollapsed: boolean;
   onToggleConversationCollapse: () => void;
+  isWorkMode?: boolean;
+  onToggleWorkMode?: () => void;
 }) {
   const { wrapper: Wrapper } = createQueryClientTestHarness();
   return render(
@@ -67,9 +69,59 @@ describe("ThreadSecondaryPanel resize handle", () => {
   });
 });
 
-// The full-screen control is the ONLY way back once the conversation is hidden
-// — there is no standalone rail to click. Pin both halves of the same-slot
-// expansion pair so a full-screen tab can always restore its prior layout.
+describe("ThreadSecondaryPanel Work mode control", () => {
+  it("keeps Enter Work mode before Hide right panel in the trailing toolbar", () => {
+    const view = renderPanel({
+      isConversationCollapsed: false,
+      onToggleConversationCollapse: noop,
+      onToggleWorkMode: noop,
+    });
+
+    const workModeControl = view.getByRole("button", {
+      name: "Enter Work mode",
+    });
+    const hideControl = view.getByRole("button", {
+      name: "Hide right panel",
+    });
+    expect(
+      workModeControl.compareDocumentPosition(hideControl) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  });
+
+  it("enters Work mode from Conversation mode", () => {
+    const onToggleWorkMode = vi.fn();
+    const view = renderPanel({
+      isConversationCollapsed: false,
+      onToggleConversationCollapse: noop,
+      onToggleWorkMode,
+    });
+
+    const control = view.getByRole("button", { name: "Enter Work mode" });
+    expect(control.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(control);
+    expect(onToggleWorkMode).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores Conversation mode from the same slot", () => {
+    const onToggleWorkMode = vi.fn();
+    const view = renderPanel({
+      isConversationCollapsed: false,
+      isWorkMode: true,
+      onToggleConversationCollapse: noop,
+      onToggleWorkMode,
+    });
+
+    const control = view.getByRole("button", { name: "Restore Conversation" });
+    expect(control.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(control);
+    expect(onToggleWorkMode).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Hosted split panes still use resource-only full screen until BB-6.
 describe("ThreadSecondaryPanel full-screen control", () => {
   it("keeps Full Screen before Hide right panel in the trailing toolbar", () => {
     const view = renderPanel({

@@ -116,3 +116,25 @@ export function getThreadConversationCollapsedAtom(
     ? threadConversationCollapsedAtomFamily(threadId)
     : disabledThreadConversationCollapsedAtom;
 }
+
+const threadWorkModeAtomFamily = atomFamily((_threadId: string) => atom(false));
+
+const disabledThreadWorkModeAtom = atom(false);
+
+/**
+ * Client-local Work mode flag for a Thread. Persistence and legacy
+ * full-screen migration belong to BB-5; this atom only keeps the
+ * presentation for the current app session.
+ */
+export function getThreadWorkModeAtom(threadId: ThreadSecondaryPanelThreadId) {
+  return hasThreadId(threadId)
+    ? threadWorkModeAtomFamily(threadId)
+    : disabledThreadWorkModeAtom;
+}
+
+/**
+ * Preferred conversation-rail width while Work mode is active. Independent
+ * from {@link secondaryPanelWidthPercentAtom} so switching modes does not
+ * overwrite either preference. Session-local until BB-5 persists it.
+ */
+export const conversationRailWidthPercentAtom = atom(36);

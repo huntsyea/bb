@@ -139,7 +139,16 @@ import {
 } from "./useThreadSecondaryPanelVisibility";
 import type { HostConnectionNotice } from "./ThreadTimelinePane";
 import { useThreadStorageViewer } from "@/components/secondary-panel/useThreadStorageViewer";
-import { getThreadConversationCollapsedAtom } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
+import {
+  getThreadConversationCollapsedAtom,
+  getThreadWorkModeAtom,
+} from "@/components/secondary-panel/threadSecondaryPanelAtoms";
+import {
+  canEnterThreadWorkMode,
+  resolveThreadPresentationMode,
+  resolveThreadSurfaceArrangement,
+  toggleThreadPresentationMode,
+} from "./threadWorkMode";
 import {
   HostFilePreviewTabContent,
   ThreadStorageFilePreviewTabContent,
@@ -492,8 +501,13 @@ export function ThreadDetailView(props: ThreadDetailViewProps) {
 
 function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   const { projectId, threadId } = props;
-  const { isFocused, navigateInPane, onRequestClose, isBoundedPane } =
-    usePaneContext();
+  const {
+    isFocused,
+    navigateInPane,
+    onRequestClose,
+    isBoundedPane,
+    secondaryPanelHost,
+  } = usePaneContext();
   const navigate = useNavigate();
   useFixedPanelTabsStorageMaintenance(threadId);
   const systemConfigQuery = useSystemConfig();
@@ -1344,12 +1358,42 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     getThreadConversationCollapsedAtom(threadId),
   );
   const isConversationCollapsed = storedConversationCollapsed;
-  // The collapse preference only applies while the panel is open on a wide
-  // viewport; ThreadDetailSecondaryContent gates it (there is nothing to expand
-  // into otherwise) and surfaces the toggle on the seam arrow.
+  // Hosted split panes still use the resource-only collapse until BB-6.
   const toggleConversationCollapse = useCallback(() => {
     setStoredConversationCollapsed((collapsed) => !collapsed);
   }, [setStoredConversationCollapsed]);
+  const [isWorkMode, setIsWorkMode] = useAtom(getThreadWorkModeAtom(threadId));
+  const isStandaloneLayout = secondaryPanelHost === null;
+  const isWorkModeActive =
+    isWorkMode &&
+    canEnterThreadWorkMode({
+      isCompactViewport: renderSecondaryPanelAsDrawer,
+      isSecondaryPanelOpen,
+      isStandaloneLayout,
+    });
+  const surfaceArrangement = resolveThreadSurfaceArrangement(
+    resolveThreadPresentationMode(isWorkModeActive),
+  );
+  const toggleWorkMode = useCallback(() => {
+    setIsWorkMode((current) => {
+      const next = toggleThreadPresentationMode(
+        resolveThreadPresentationMode(current),
+      );
+      return next === "work";
+    });
+  }, [setIsWorkMode]);
+  const handleCloseSecondaryPanel = useCallback(() => {
+    if (isWorkMode) {
+      setIsWorkMode(false);
+    }
+    closeSecondaryPanel();
+  }, [closeSecondaryPanel, isWorkMode, setIsWorkMode]);
+  const handleToggleSecondaryPanel = useCallback(() => {
+    if (isSecondaryPanelOpen && isWorkMode) {
+      setIsWorkMode(false);
+    }
+    toggleSecondaryPanel();
+  }, [isSecondaryPanelOpen, isWorkMode, setIsWorkMode, toggleSecondaryPanel]);
   useEffect(() => {
     setHasRequestedMergeBaseOptions(false);
   }, [thread?.environmentId]);
@@ -1530,18 +1574,33 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     }
     // No closable tab is active (e.g. thread-info or git-diff): hide the
     // panel before letting the next Cmd+W close the window.
-    closeSecondaryPanel();
+    handleCloseSecondaryPanel();
     return true;
   }, [
     activeFixedSecondaryTab,
-    closeSecondaryPanel,
     closeTab,
+    handleCloseSecondaryPanel,
     handleCloseTerminalTab,
     isSecondaryPanelOpen,
   ]);
   useAppCommandHandler("panel.toggle", () => {
     if (!isFocused) return false;
-    toggleSecondaryPanel();
+    handleToggleSecondaryPanel();
+    return true;
+  });
+  useAppCommandHandler("thread.workMode.toggle", () => {
+    if (!isFocused) return false;
+    if (
+      !isWorkMode &&
+      !canEnterThreadWorkMode({
+        isCompactViewport: renderSecondaryPanelAsDrawer,
+        isSecondaryPanelOpen,
+        isStandaloneLayout,
+      })
+    ) {
+      return false;
+    }
+    toggleWorkMode();
     return true;
   });
   useAppCommandHandler("panel.close", () => {
@@ -2560,7 +2619,8 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
       isSecondaryPanelOpen={isSecondaryPanelOpen}
       onClosePane={onRequestClose ?? undefined}
       onOpenThreadGitAction={gitActions.threadGitActionDialog.onOpen}
-      onToggleSecondaryPanel={toggleSecondaryPanel}
+      onToggleSecondaryPanel={handleToggleSecondaryPanel}
+      presentation={isWorkModeActive ? "conversation-rail" : "page"}
       pluginActions={
         <PluginThreadHeaderActions
           threadId={thread.id}
@@ -2733,9 +2793,11 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
           isMetadataLoading={environmentQuery.isLoading}
           isSecondaryPanelOpen={isSecondaryPanelOpen}
           isConversationCollapsed={isConversationCollapsed}
+          isWorkMode={isWorkModeActive}
           isBoundedPane={isBoundedPane}
-          onToggleSecondaryPanel={toggleSecondaryPanel}
+          onToggleSecondaryPanel={handleToggleSecondaryPanel}
           onToggleConversationCollapse={toggleConversationCollapse}
+          onToggleWorkMode={toggleWorkMode}
           renderHostedPanel={(panel) => (
             <MarkdownLocalFileContextMenuContext.Provider
               value={getLocalFileContextMenuItems}
@@ -2800,8 +2862,8 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
             renderBrowserDeck,
             isBrowserTabActive,
             isOpen: isSecondaryPanelOpen,
-            onClose: closeSecondaryPanel,
-            onCollapse: closeSecondaryPanel,
+            onClose: handleCloseSecondaryPanel,
+            onCollapse: handleCloseSecondaryPanel,
             onClearPendingGitDiffIntent: clearPendingGitDiffIntent,
             onOpenFileInEditor: handleOpenFileInEditor,
             onFileTabReorder: reorderFileTab,
@@ -2815,7 +2877,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
             onPanelChange: handleSecondaryPanelChange,
             showGitDiffTab: canUseGitUi,
           }}
-          surfaceArrangement="conversation-primary"
+          surfaceArrangement={surfaceArrangement}
           timeline={{
             activeThinking,
             canSpawnChild: thread.canSpawnChild,

@@ -23,8 +23,13 @@ import { cn } from "@bb/shared-ui/lib/utils";
 import { ThreadSecondaryPanel } from "@/components/secondary-panel/ThreadSecondaryPanel";
 import { useDrawerPanelRealization } from "@/components/secondary-panel/useDrawerPanelRealization";
 import {
+  conversationRailWidthPercentAtom,
   secondaryPanelWidthPercentAtom,
 } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
+import {
+  CONVERSATION_RAIL_MIN_SIZE_PERCENT,
+  resolveThreadWorkModeLayoutSizes,
+} from "./threadWorkMode";
 import {
   ThreadMetadataCard,
   ThreadMetadataContent,
@@ -63,6 +68,8 @@ type ThreadSecondaryPanelProps = Omit<
   | "renderAsDrawer"
   | "isConversationCollapsed"
   | "onToggleConversationCollapse"
+  | "isWorkMode"
+  | "onToggleWorkMode"
   | "browserDeck"
 > & {
   renderBrowserDeck?: (args: {
@@ -76,6 +83,7 @@ interface ThreadDetailSecondaryContentProps {
   isMetadataLoading: boolean;
   isSecondaryPanelOpen: boolean;
   isConversationCollapsed: boolean;
+  isWorkMode: boolean;
   /**
    * True when rendering inside a bounded split card. Bounded panes skip the
    * page-bleed negative margins below — the card supplies the boundary, so
@@ -86,6 +94,7 @@ interface ThreadDetailSecondaryContentProps {
   isBoundedPane: boolean;
   onToggleSecondaryPanel: () => void;
   onToggleConversationCollapse: () => void;
+  onToggleWorkMode: () => void;
   renderHostedPanel: (panel: ReactNode) => ReactNode;
   metadata: ThreadMetadataContentProps;
   secondaryPanel: ThreadSecondaryPanelProps;
@@ -109,9 +118,11 @@ function ThreadDetailSecondaryContentBody({
   isMetadataLoading,
   isSecondaryPanelOpen,
   isConversationCollapsed,
+  isWorkMode,
   isBoundedPane,
   onToggleSecondaryPanel,
   onToggleConversationCollapse,
+  onToggleWorkMode,
   renderHostedPanel,
   metadata,
   secondaryPanel,
@@ -127,11 +138,24 @@ function ThreadDetailSecondaryContentBody({
   const persistedSecondaryWidthPercent = useAtomValue(
     secondaryPanelWidthPercentAtom,
   );
-  // Collapsing the conversation only makes sense on a wide viewport with the
-  // secondary panel open — there is otherwise nothing to expand into.
-  const canCollapseConversation = isSecondaryPanelOpen && !renderAsDrawer;
+  const conversationRailWidthPercent = useAtomValue(
+    conversationRailWidthPercentAtom,
+  );
+  // Hosted split panes still collapse the conversation. Standalone Thread
+  // detail uses Work mode instead, which keeps the conversation visible.
+  const isStandaloneWideLayout = secondaryPanelHost === null && !renderAsDrawer;
+  const isWorkModeActive =
+    isStandaloneWideLayout && isWorkMode && isSecondaryPanelOpen;
+  const canCollapseConversation =
+    !isStandaloneWideLayout && isSecondaryPanelOpen && !renderAsDrawer;
   const isConversationCollapsedActive =
     canCollapseConversation && isConversationCollapsed;
+  const layoutSizes = resolveThreadWorkModeLayoutSizes({
+    isWorkMode: isWorkModeActive,
+    isSecondaryPanelOpen: isSecondaryPanelOpen && !renderAsDrawer,
+    conversationRailWidthPercent,
+    secondaryPanelWidthPercent: persistedSecondaryWidthPercent,
+  });
   const [isCompactDrawerContentSettled, setIsCompactDrawerContentSettled] =
     useState(false);
   const { isPanelRealized, realizePanel } = useDrawerPanelRealization({
@@ -260,11 +284,26 @@ function ThreadDetailSecondaryContentBody({
     }
     if (isConversationCollapsedActive) {
       group.setLayout([COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT, 100]);
-    } else {
-      const secondaryWidth = persistedSecondaryWidthRef.current;
-      group.setLayout([100 - secondaryWidth, secondaryWidth]);
+      return;
     }
-  }, [isConversationCollapsedActive, isSecondaryPanelOpen, renderAsDrawer]);
+    if (isWorkModeActive) {
+      // Panel order is work surface first, conversation rail second.
+      group.setLayout([
+        layoutSizes.workSurfaceSizePercent,
+        layoutSizes.conversationSizePercent,
+      ]);
+      return;
+    }
+    const secondaryWidth = persistedSecondaryWidthRef.current;
+    group.setLayout([100 - secondaryWidth, secondaryWidth]);
+  }, [
+    isConversationCollapsedActive,
+    isSecondaryPanelOpen,
+    isWorkModeActive,
+    layoutSizes.conversationSizePercent,
+    layoutSizes.workSurfaceSizePercent,
+    renderAsDrawer,
+  ]);
 
   // Mirror ForksRow's query (deduped by react-query) so the visibility gate
   // accounts for the lazily-fetched Forks row.
@@ -300,6 +339,10 @@ function ThreadDetailSecondaryContentBody({
           renderAsDrawer={false}
           isConversationCollapsed={isConversationCollapsedActive}
           onToggleConversationCollapse={onToggleConversationCollapse}
+          isWorkMode={isWorkModeActive}
+          onToggleWorkMode={
+            isStandaloneWideLayout ? onToggleWorkMode : undefined
+          }
           // The owning thread or workspace header shows a closed panel. Once
           // open, collapse belongs at the outer edge of the panel toolbar.
           inlinePanelToggle="button"
@@ -316,8 +359,11 @@ function ThreadDetailSecondaryContentBody({
     [
       browserDeck,
       isConversationCollapsedActive,
+      isStandaloneWideLayout,
+      isWorkModeActive,
       metadataContent,
       onToggleConversationCollapse,
+      onToggleWorkMode,
       paneId,
       renderAsDrawer,
       secondaryPanelHost,
@@ -376,6 +422,7 @@ function ThreadDetailSecondaryContentBody({
 
   return (
     <div
+      data-thread-mode={isWorkModeActive ? "work" : "conversation"}
       className={cn(
         "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-clip",
         !isBoundedPane && "-mx-4 -mb-4 -mt-4 md:-mx-5 md:-mb-5 md:-mt-5",
@@ -414,16 +461,20 @@ function ThreadDetailSecondaryContentBody({
             renderConversation={(layout) => (
               <Panel
                 id="thread-detail-timeline-panel"
-                collapsible
+                collapsible={!isWorkModeActive}
                 collapsedSize={COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT}
                 defaultSize={
                   isConversationCollapsedActive
                     ? COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT
                     : isSecondaryPanelOpen && !renderAsDrawer
-                      ? 100 - persistedSecondaryWidthPercent
+                      ? layoutSizes.conversationSizePercent
                       : CLOSED_TIMELINE_PANEL_SIZE_PERCENT
                 }
-                minSize={TIMELINE_PANEL_MIN_SIZE_PERCENT}
+                minSize={
+                  isWorkModeActive
+                    ? CONVERSATION_RAIL_MIN_SIZE_PERCENT
+                    : TIMELINE_PANEL_MIN_SIZE_PERCENT
+                }
                 order={layout.panelOrder}
                 style={{ order: layout.visualOrder }}
                 className={cn(
@@ -433,9 +484,7 @@ function ThreadDetailSecondaryContentBody({
               >
                 <div
                   data-thread-region="conversation"
-                  data-conversation-collapsed={
-                    isConversationCollapsedActive
-                  }
+                  data-conversation-collapsed={isConversationCollapsedActive}
                   // `inert` removes the hidden conversation (header, timeline,
                   // composer) from the tab order and a11y tree and blocks pointer
                   // events, so keyboard focus can't land in the invisible pane.
@@ -455,7 +504,10 @@ function ThreadDetailSecondaryContentBody({
               inlineSecondaryPanelContent === null
                 ? null
                 : cloneElement(inlineSecondaryPanelContent, {
-                    resizablePanelLayout: layout,
+                    resizablePanelLayout: {
+                      ...layout,
+                      sizePercent: layoutSizes.workSurfaceSizePercent,
+                    },
                   })
             }
           />

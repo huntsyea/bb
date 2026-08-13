@@ -1,5 +1,7 @@
 export type PanelToggleAction =
   | "show-panel"
+  | "enter-work-mode"
+  | "restore-conversation"
   | "enter-full-screen"
   | "exit-full-screen";
 
@@ -13,48 +15,62 @@ interface PanelToggleActionPresentation {
   label: string;
   iconName: PanelToggleIconName;
   /**
-   * Whether the action is currently presenting the panel in full-screen mode.
-   * This drives the toggle button's `aria-pressed` state.
+   * Whether the action is currently presenting Work mode (or the hosted
+   * pane's remaining full-screen collapse). This drives `aria-pressed`.
    */
-  isFullScreen: boolean;
+  isPressed: boolean;
 }
 
 /**
  * The single source of truth for each action's copy, icon, and disclosure
  * state. Both the conversation-header "show panel" button and the in-panel
- * collapse toggle resolve their presentation from here, so the two surfaces
+ * mode toggle resolve their presentation from here, so the two surfaces
  * stay in lockstep:
  *
- *   show-panel           → open the panel. Renders the PanelRight icon so it
- *                          reads as "open the right side panel" — matching the
- *                          in-panel hide button. Lives in the conversation
- *                          header, only while the panel is closed.
- *   enter-full-screen    → expand the right panel to fill the content area.
- *   exit-full-screen     → restore the previous thread-and-panel layout.
- * Both actions stay in the panel header so the control transforms in place.
+ *   show-panel            → open the panel. Renders the PanelRight icon so it
+ *                           reads as "open the right side panel" — matching the
+ *                           in-panel hide button. Lives in the conversation
+ *                           header, only while the panel is closed.
+ *   enter-work-mode       → promote the work surface to the primary canvas.
+ *   restore-conversation  → restore Conversation mode from the same control.
+ *   enter-full-screen     → hosted split panes still collapse conversation
+ *                           until BB-6 wires Work mode there.
+ *   exit-full-screen      → restore the hosted pane's conversation column.
+ * Standalone Work mode actions stay in the panel header so the control
+ * transforms in place.
  */
 const PANEL_TOGGLE_ACTION_PRESENTATION = {
   "show-panel": {
     label: "Show right panel",
     iconName: "PanelRight",
-    isFullScreen: false,
+    isPressed: false,
+  },
+  "enter-work-mode": {
+    label: "Enter Work mode",
+    iconName: "Maximize2",
+    isPressed: false,
+  },
+  "restore-conversation": {
+    label: "Restore Conversation",
+    iconName: "Minimize2",
+    isPressed: true,
   },
   "enter-full-screen": {
     label: "Full Screen",
     iconName: "Maximize2",
-    isFullScreen: false,
+    isPressed: false,
   },
   "exit-full-screen": {
     label: "Exit Full Screen",
     iconName: "Minimize2",
-    isFullScreen: true,
+    isPressed: true,
   },
 } as const satisfies Record<PanelToggleAction, PanelToggleActionPresentation>;
 
 export interface PanelToggleControlState {
   action: PanelToggleAction;
   label: string;
-  isFullScreen: boolean;
+  isPressed: boolean;
   iconName: PanelToggleIconName;
   onClick: () => void;
 }
@@ -84,9 +100,8 @@ export interface ResolveConversationCollapseControlArgs {
 }
 
 /**
- * Resolves the paired conversation disclosure states. One control in the panel
- * header renders both: it expands the panel while the conversation is visible,
- * and restores the conversation while the panel owns the full canvas.
+ * Hosted split panes still use the resource-only collapse control until BB-6
+ * wires Work mode into the split host.
  */
 export function resolveConversationCollapseControl({
   isConversationCollapsed,
@@ -99,5 +114,28 @@ export function resolveConversationCollapseControl({
     action,
     ...PANEL_TOGGLE_ACTION_PRESENTATION[action],
     onClick: onToggleConversationCollapse,
+  };
+}
+
+export interface ResolveWorkModeControlArgs {
+  isWorkMode: boolean;
+  onToggleWorkMode: () => void;
+}
+
+/**
+ * One transforming control in the work-surface toolbar. Enter promotes the
+ * existing work surface; restore returns to Conversation mode.
+ */
+export function resolveWorkModeControl({
+  isWorkMode,
+  onToggleWorkMode,
+}: ResolveWorkModeControlArgs): PanelToggleControlState {
+  const action: PanelToggleAction = isWorkMode
+    ? "restore-conversation"
+    : "enter-work-mode";
+  return {
+    action,
+    ...PANEL_TOGGLE_ACTION_PRESENTATION[action],
+    onClick: onToggleWorkMode,
   };
 }

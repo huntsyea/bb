@@ -65,6 +65,11 @@ interface ThreadDetailHeaderProps {
   threadHeaderGitActions: ThreadHeaderGitAction[];
   threadTitle: string;
   workspaceOpenButton?: ReactNode;
+  /**
+   * Conversation-rail presentation keeps the header identifiable and
+   * controllable while hiding bulky inline actions that do not fit the rail.
+   */
+  presentation?: "page" | "conversation-rail";
 }
 
 export function ThreadDetailHeader({
@@ -78,6 +83,7 @@ export function ThreadDetailHeader({
   threadHeaderGitActions,
   threadTitle,
   workspaceOpenButton,
+  presentation = "page",
 }: ThreadDetailHeaderProps) {
   const [primaryAction, ...secondaryActions] = threadHeaderGitActions;
   const renderAsDrawer = useIsCompactViewport();
@@ -100,9 +106,10 @@ export function ThreadDetailHeader({
   const isSplitPaneHeader = beginPaneDrag !== undefined;
   const [measuredPaneWidth, setMeasuredPaneWidth] = useState(0);
   const usesResponsiveActionOverflow =
-    isSplitPaneHeader &&
-    measuredPaneWidth > 0 &&
-    measuredPaneWidth < NARROW_SPLIT_HEADER_MAX_WIDTH;
+    presentation === "conversation-rail" ||
+    (isSplitPaneHeader &&
+      measuredPaneWidth > 0 &&
+      measuredPaneWidth < NARROW_SPLIT_HEADER_MAX_WIDTH);
   useLayoutEffect(() => {
     if (!isSplitPaneHeader) {
       return;

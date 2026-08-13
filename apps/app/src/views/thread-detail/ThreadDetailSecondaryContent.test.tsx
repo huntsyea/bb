@@ -220,13 +220,18 @@ vi.mock("./ThreadTimelinePane", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./ThreadTimelinePane")>();
 
   const ThreadTimelinePane = ({
+    footer,
     threadId,
   }: ComponentProps<typeof actual.ThreadTimelinePane>) =>
-    React.createElement("div", {
-      "data-testid": "thread-timeline-pane",
-      "data-thread-id": threadId,
-      tabIndex: -1,
-    });
+    React.createElement(
+      "div",
+      {
+        "data-testid": "thread-timeline-pane",
+        "data-thread-id": threadId,
+        tabIndex: -1,
+      },
+      footer,
+    );
 
   return { ...actual, ThreadTimelinePane };
 });
@@ -243,6 +248,7 @@ interface RenderThreadDetailArgs {
   isFocusedHosted?: boolean;
   isCompactViewport: boolean;
   isSecondaryPanelOpen: boolean;
+  isWorkMode?: boolean;
   renderBrowserDeck: RenderBrowserDeck;
   threadId: string;
 }
@@ -387,6 +393,7 @@ function StatefulConversationHeader() {
 function createProps({
   arrangement = "conversation-primary",
   isSecondaryPanelOpen,
+  isWorkMode = false,
   renderBrowserDeck,
   threadId,
 }: Omit<
@@ -398,6 +405,7 @@ function createProps({
     header: <StatefulConversationHeader />,
     isBoundedPane: false,
     isConversationCollapsed: false,
+    isWorkMode,
     isMetadataLoading: false,
     isSecondaryPanelOpen,
     metadata: {
@@ -426,6 +434,7 @@ function createProps({
     } as ThreadDetailSecondaryContentProps["metadata"],
     onToggleConversationCollapse: noop,
     onToggleSecondaryPanel: noop,
+    onToggleWorkMode: noop,
     renderHostedPanel: (panel) => panel,
     secondaryPanel: {
       activeTab: null,
@@ -476,6 +485,7 @@ function renderThreadDetail(args: RenderThreadDetailArgs) {
           {...createProps({
             arrangement: renderArgs.arrangement,
             isSecondaryPanelOpen: renderArgs.isSecondaryPanelOpen,
+            isWorkMode: renderArgs.isWorkMode,
             renderBrowserDeck: renderArgs.renderBrowserDeck,
             threadId: renderArgs.threadId,
           })}
@@ -499,6 +509,7 @@ function renderThreadDetail(args: RenderThreadDetailArgs) {
               {...createProps({
                 arrangement: renderArgs.arrangement,
                 isSecondaryPanelOpen: renderArgs.isSecondaryPanelOpen,
+                isWorkMode: renderArgs.isWorkMode,
                 renderBrowserDeck: renderArgs.renderBrowserDeck,
                 threadId: renderArgs.threadId,
               })}
@@ -600,11 +611,47 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
     expect(panelGroup.contains(sidePanel)).toBe(true);
   });
 
-  it("preserves real Thread region state and focus across host rearrangement", () => {
+  it("does not promote when a resource opens in Conversation mode", () => {
+    const pushState = vi.spyOn(window.history, "pushState");
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const view = renderThreadDetail({
+      arrangement: "conversation-primary",
+      isCompactViewport: false,
+      isSecondaryPanelOpen: false,
+      isWorkMode: false,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+
+    expect(
+      screen
+        .getByTestId("panel")
+        .closest("[data-thread-mode]")
+        ?.getAttribute("data-thread-mode"),
+    ).toBe("conversation");
+
+    view.rerenderWith({ isSecondaryPanelOpen: true });
+
+    expect(
+      screen
+        .getByTestId("panel")
+        .closest("[data-thread-mode]")
+        ?.getAttribute("data-thread-mode"),
+    ).toBe("conversation");
+    expect(screen.getByTestId("panel").style.order).toBe("1");
+    expect(screen.getByTestId("inline-secondary-panel").style.order).toBe("3");
+    expect(pushState).not.toHaveBeenCalled();
+    expect(replaceState).not.toHaveBeenCalled();
+  });
+
+  it("preserves real Thread region state and focus across Conversation and Work mode", () => {
+    const pushState = vi.spyOn(window.history, "pushState");
+    const replaceState = vi.spyOn(window.history, "replaceState");
     const view = renderThreadDetail({
       arrangement: "conversation-primary",
       isCompactViewport: false,
       isSecondaryPanelOpen: true,
+      isWorkMode: false,
       renderBrowserDeck: createBrowserDeckRenderer(),
       threadId: "thread-1",
     });
@@ -623,7 +670,10 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
     timeline.scrollTop = 240;
     draft.focus();
 
-    view.rerenderWith({ arrangement: "work-surface-primary" });
+    view.rerenderWith({
+      arrangement: "work-surface-primary",
+      isWorkMode: true,
+    });
 
     const preservedDraft = screen.getByRole("textbox", { name: "Draft" });
     expect(screen.getAllByTestId("thread-timeline-pane")).toHaveLength(1);
@@ -645,11 +695,24 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
     );
     expect(document.activeElement).toBe(preservedDraft);
     expect(screen.getByTestId("panel").style.order).toBe("3");
-    expect(screen.getByTestId("inline-secondary-panel").style.order).toBe(
-      "1",
-    );
+    expect(screen.getByTestId("inline-secondary-panel").style.order).toBe("1");
+    expect(
+      screen
+        .getByTestId("panel")
+        .closest("[data-thread-mode]")
+        ?.getAttribute("data-thread-mode"),
+    ).toBe("work");
+    expect(screen.getByTestId("header")).not.toBeNull();
+    expect(screen.getByTestId("footer")).not.toBeNull();
+    expect(conversation.contains(screen.getByTestId("header"))).toBe(true);
+    expect(conversation.contains(screen.getByTestId("footer"))).toBe(true);
+    expect(pushState).not.toHaveBeenCalled();
+    expect(replaceState).not.toHaveBeenCalled();
 
-    view.rerenderWith({ arrangement: "conversation-primary" });
+    view.rerenderWith({
+      arrangement: "conversation-primary",
+      isWorkMode: false,
+    });
 
     expect(
       screen
@@ -658,6 +721,14 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
     ).toBe(conversation);
     expect(screen.getByTestId("inline-secondary-panel")).toBe(workSurface);
     expect(document.activeElement).toBe(preservedDraft);
+    expect(
+      screen
+        .getByTestId("panel")
+        .closest("[data-thread-mode]")
+        ?.getAttribute("data-thread-mode"),
+    ).toBe("conversation");
+    expect(pushState).not.toHaveBeenCalled();
+    expect(replaceState).not.toHaveBeenCalled();
   });
 
   it("hides and restores native browser readiness as hosted pane focus changes", () => {

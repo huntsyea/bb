@@ -75,6 +75,40 @@ describe("ThreadDetailHeader", () => {
     ).toBeNull();
   });
 
+  it("compacts the conversation-rail header to title and menu actions", () => {
+    render(
+      <PaneContext.Provider value={PANE_CONTEXT}>
+        <ThreadDetailHeader
+          actionsMenu={(includeResponsiveActions) => (
+            <>
+              <span>Thread menu</span>
+              {includeResponsiveActions ? (
+                <span>Responsive menu actions</span>
+              ) : null}
+            </>
+          )}
+          childPillLabel="child"
+          isSecondaryPanelOpen
+          onOpenThreadGitAction={vi.fn()}
+          onToggleSecondaryPanel={vi.fn()}
+          presentation="conversation-rail"
+          threadHeaderGitActions={[
+            { label: "Commit", target: { kind: "commit" } },
+          ]}
+          threadTitle="Rail thread"
+          workspaceOpenButton={<button>Open workspace</button>}
+        />
+      </PaneContext.Provider>,
+    );
+
+    expect(screen.getByText("Rail thread")).not.toBeNull();
+    expect(screen.getByText("child")).not.toBeNull();
+    expect(screen.getByText("Thread menu")).not.toBeNull();
+    expect(screen.getByText("Responsive menu actions")).not.toBeNull();
+    expect(screen.queryByText("Open workspace")).toBeNull();
+    expect(screen.queryByText("Commit")).toBeNull();
+  });
+
   it("keeps thread Full Screen in a split header while its panel is open", () => {
     render(
       <PaneContext.Provider
