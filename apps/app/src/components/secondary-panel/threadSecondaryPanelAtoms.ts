@@ -133,6 +133,24 @@ export function getThreadWorkModeAtom(threadId: ThreadSecondaryPanelThreadId) {
     : disabledThreadWorkModeAtom;
 }
 
+const threadWorkSurfaceRecencyAtomFamily = atomFamily((_threadId: string) =>
+  atom<string[]>([]),
+);
+
+const disabledThreadWorkSurfaceRecencyAtom = atom<string[]>([]);
+
+/**
+ * Client-local most-recently-used eligible work-surface ids for a Thread.
+ * Newest first. Session-local until BB-5 persists presentation state.
+ */
+export function getThreadWorkSurfaceRecencyAtom(
+  threadId: ThreadSecondaryPanelThreadId,
+) {
+  return hasThreadId(threadId)
+    ? threadWorkSurfaceRecencyAtomFamily(threadId)
+    : disabledThreadWorkSurfaceRecencyAtom;
+}
+
 /**
  * Preferred conversation-rail width while Work mode is active. Independent
  * from {@link secondaryPanelWidthPercentAtom} so switching modes does not

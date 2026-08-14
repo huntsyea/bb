@@ -25,6 +25,7 @@ export function toggleThreadPresentationMode(
 }
 
 export function canEnterThreadWorkMode(args: {
+  hasEligibleWorkSurface: boolean;
   isCompactViewport: boolean;
   isSecondaryPanelOpen: boolean;
   isStandaloneLayout: boolean;
@@ -32,7 +33,8 @@ export function canEnterThreadWorkMode(args: {
   return (
     args.isStandaloneLayout &&
     args.isSecondaryPanelOpen &&
-    !args.isCompactViewport
+    !args.isCompactViewport &&
+    args.hasEligibleWorkSurface
   );
 }
 

@@ -23,6 +23,7 @@ describe("threadWorkMode", () => {
   it("never enters Work mode from an ordinary resource open", () => {
     expect(
       canEnterThreadWorkMode({
+        hasEligibleWorkSurface: true,
         isCompactViewport: false,
         isSecondaryPanelOpen: true,
         isStandaloneLayout: true,
@@ -30,6 +31,15 @@ describe("threadWorkMode", () => {
     ).toBe(true);
     expect(
       canEnterThreadWorkMode({
+        hasEligibleWorkSurface: false,
+        isCompactViewport: false,
+        isSecondaryPanelOpen: true,
+        isStandaloneLayout: true,
+      }),
+    ).toBe(false);
+    expect(
+      canEnterThreadWorkMode({
+        hasEligibleWorkSurface: true,
         isCompactViewport: false,
         isSecondaryPanelOpen: false,
         isStandaloneLayout: true,
@@ -37,6 +47,7 @@ describe("threadWorkMode", () => {
     ).toBe(false);
     expect(
       canEnterThreadWorkMode({
+        hasEligibleWorkSurface: true,
         isCompactViewport: true,
         isSecondaryPanelOpen: true,
         isStandaloneLayout: true,
@@ -44,6 +55,7 @@ describe("threadWorkMode", () => {
     ).toBe(false);
     expect(
       canEnterThreadWorkMode({
+        hasEligibleWorkSurface: true,
         isCompactViewport: false,
         isSecondaryPanelOpen: true,
         isStandaloneLayout: false,
