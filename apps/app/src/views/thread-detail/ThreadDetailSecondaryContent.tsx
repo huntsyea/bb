@@ -18,16 +18,18 @@ import { ResponsiveDrawerShell } from "@bb/shared-ui/responsive-overlay";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { Skeleton } from "@bb/shared-ui/skeleton";
 import { DETAIL_GRID_CLASS } from "@/components/ui/detail-card.js";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { ThreadSecondaryPanel } from "@/components/secondary-panel/ThreadSecondaryPanel";
 import { useDrawerPanelRealization } from "@/components/secondary-panel/useDrawerPanelRealization";
 import {
   conversationRailWidthPercentAtom,
   secondaryPanelWidthPercentAtom,
+  threadSecondaryPanelResizingAtom,
 } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
 import {
   CONVERSATION_RAIL_MIN_SIZE_PERCENT,
+  resolveConversationRailWidthUpdate,
   resolveThreadWorkModeLayoutSizes,
 } from "./threadWorkMode";
 import {
@@ -140,6 +142,12 @@ function ThreadDetailSecondaryContentBody({
   );
   const conversationRailWidthPercent = useAtomValue(
     conversationRailWidthPercentAtom,
+  );
+  const setConversationRailWidthPercent = useSetAtom(
+    conversationRailWidthPercentAtom,
+  );
+  const isSecondaryPanelResizing = useAtomValue(
+    threadSecondaryPanelResizingAtom,
   );
   // Hosted split panes still collapse the conversation. Standalone Thread
   // detail uses Work mode instead, which keeps the conversation visible.
@@ -268,6 +276,10 @@ function ThreadDetailSecondaryContentBody({
   useEffect(() => {
     persistedSecondaryWidthRef.current = persistedSecondaryWidthPercent;
   }, [persistedSecondaryWidthPercent]);
+  const conversationRailWidthRef = useRef(conversationRailWidthPercent);
+  useEffect(() => {
+    conversationRailWidthRef.current = conversationRailWidthPercent;
+  }, [conversationRailWidthPercent]);
   const didMountConversationCollapseRef = useRef(false);
   useLayoutEffect(() => {
     // Initial mount is handled by each panel's defaultSize; only animate when
@@ -287,11 +299,8 @@ function ThreadDetailSecondaryContentBody({
       return;
     }
     if (isWorkModeActive) {
-      // Panel order is work surface first, conversation rail second.
-      group.setLayout([
-        layoutSizes.workSurfaceSizePercent,
-        layoutSizes.conversationSizePercent,
-      ]);
+      const railWidth = conversationRailWidthRef.current;
+      group.setLayout([100 - railWidth, railWidth]);
       return;
     }
     const secondaryWidth = persistedSecondaryWidthRef.current;
@@ -300,8 +309,6 @@ function ThreadDetailSecondaryContentBody({
     isConversationCollapsedActive,
     isSecondaryPanelOpen,
     isWorkModeActive,
-    layoutSizes.conversationSizePercent,
-    layoutSizes.workSurfaceSizePercent,
     renderAsDrawer,
   ]);
 
@@ -475,6 +482,16 @@ function ThreadDetailSecondaryContentBody({
                     ? CONVERSATION_RAIL_MIN_SIZE_PERCENT
                     : TIMELINE_PANEL_MIN_SIZE_PERCENT
                 }
+                onResize={(size) => {
+                  const nextWidth = resolveConversationRailWidthUpdate({
+                    isWorkMode: isWorkModeActive,
+                    isUserResizing: isSecondaryPanelResizing,
+                    sizePercent: size,
+                  });
+                  if (nextWidth !== null) {
+                    setConversationRailWidthPercent(nextWidth);
+                  }
+                }}
                 order={layout.panelOrder}
                 style={{ order: layout.visualOrder }}
                 className={cn(

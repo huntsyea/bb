@@ -2,6 +2,7 @@ import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { atomFamily } from "jotai-family";
 import { createLocalStorageSyncStorage } from "@/lib/browser-storage";
+import { DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT } from "@/views/thread-detail/threadWorkMode";
 
 export const threadSecondaryPanelResizingAtom = atom(false);
 
@@ -137,4 +138,6 @@ export function getThreadWorkModeAtom(threadId: ThreadSecondaryPanelThreadId) {
  * from {@link secondaryPanelWidthPercentAtom} so switching modes does not
  * overwrite either preference. Session-local until BB-5 persists it.
  */
-export const conversationRailWidthPercentAtom = atom(36);
+export const conversationRailWidthPercentAtom = atom(
+  DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT,
+);

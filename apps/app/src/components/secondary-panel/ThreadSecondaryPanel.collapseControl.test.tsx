@@ -104,6 +104,23 @@ describe("ThreadSecondaryPanel Work mode control", () => {
     expect(onToggleWorkMode).toHaveBeenCalledTimes(1);
   });
 
+  it("renames the hide control while the work surface is primary", () => {
+    const view = renderPanel({
+      isConversationCollapsed: false,
+      isWorkMode: true,
+      onToggleConversationCollapse: noop,
+      onToggleWorkMode: noop,
+    });
+
+    expect(
+      view.getByRole("button", { name: "Hide work surface" }),
+    ).not.toBeNull();
+    expect(view.queryByRole("button", { name: "Hide right panel" })).toBeNull();
+    expect(
+      view.getByRole("toolbar", { name: "Work surface views" }),
+    ).not.toBeNull();
+  });
+
   it("restores Conversation mode from the same slot", () => {
     const onToggleWorkMode = vi.fn();
     const view = renderPanel({

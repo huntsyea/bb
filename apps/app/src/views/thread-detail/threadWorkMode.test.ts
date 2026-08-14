@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT,
   canEnterThreadWorkMode,
+  resolveConversationRailWidthUpdate,
   resolveThreadSurfaceArrangement,
   resolveThreadWorkModeLayoutSizes,
   toggleThreadPresentationMode,
@@ -65,12 +67,36 @@ describe("threadWorkMode", () => {
       resolveThreadWorkModeLayoutSizes({
         isWorkMode: true,
         isSecondaryPanelOpen: true,
-        conversationRailWidthPercent: 36,
+        conversationRailWidthPercent: DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT,
         secondaryPanelWidthPercent: 50,
       }),
     ).toEqual({
-      conversationSizePercent: 36,
-      workSurfaceSizePercent: 64,
+      conversationSizePercent: DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT,
+      workSurfaceSizePercent: 100 - DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT,
     });
+  });
+
+  it("records a rail width only during a user drag in Work mode", () => {
+    expect(
+      resolveConversationRailWidthUpdate({
+        isWorkMode: true,
+        isUserResizing: true,
+        sizePercent: 42,
+      }),
+    ).toBe(42);
+    expect(
+      resolveConversationRailWidthUpdate({
+        isWorkMode: true,
+        isUserResizing: false,
+        sizePercent: 42,
+      }),
+    ).toBeNull();
+    expect(
+      resolveConversationRailWidthUpdate({
+        isWorkMode: false,
+        isUserResizing: true,
+        sizePercent: 42,
+      }),
+    ).toBeNull();
   });
 });

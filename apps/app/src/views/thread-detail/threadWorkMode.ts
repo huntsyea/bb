@@ -59,3 +59,14 @@ export function resolveThreadWorkModeLayoutSizes(args: {
     workSurfaceSizePercent: args.secondaryPanelWidthPercent,
   };
 }
+
+export function resolveConversationRailWidthUpdate(args: {
+  isWorkMode: boolean;
+  isUserResizing: boolean;
+  sizePercent: number;
+}): number | null {
+  if (!args.isWorkMode || !args.isUserResizing || args.sizePercent <= 0) {
+    return null;
+  }
+  return args.sizePercent;
+}

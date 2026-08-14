@@ -22,22 +22,7 @@ interface PanelToggleActionPresentation {
 }
 
 /**
- * The single source of truth for each action's copy, icon, and disclosure
- * state. Both the conversation-header "show panel" button and the in-panel
- * mode toggle resolve their presentation from here, so the two surfaces
- * stay in lockstep:
- *
- *   show-panel            → open the panel. Renders the PanelRight icon so it
- *                           reads as "open the right side panel" — matching the
- *                           in-panel hide button. Lives in the conversation
- *                           header, only while the panel is closed.
- *   enter-work-mode       → promote the work surface to the primary canvas.
- *   restore-conversation  → restore Conversation mode from the same control.
- *   enter-full-screen     → hosted split panes still collapse conversation
- *                           until BB-6 wires Work mode there.
- *   exit-full-screen      → restore the hosted pane's conversation column.
- * Standalone Work mode actions stay in the panel header so the control
- * transforms in place.
+ * Shared copy and icons for the conversation-header and in-panel toggles.
  */
 const PANEL_TOGGLE_ACTION_PRESENTATION = {
   "show-panel": {
@@ -99,10 +84,7 @@ export interface ResolveConversationCollapseControlArgs {
   onToggleConversationCollapse: () => void;
 }
 
-/**
- * Hosted split panes still use the resource-only collapse control until BB-6
- * wires Work mode into the split host.
- */
+/** Resource-only full-screen control used by hosted split panes. */
 export function resolveConversationCollapseControl({
   isConversationCollapsed,
   onToggleConversationCollapse,

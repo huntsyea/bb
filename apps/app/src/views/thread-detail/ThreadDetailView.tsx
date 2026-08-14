@@ -1612,7 +1612,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
       return false;
     }
     if (isSecondaryPanelOpen && activeFixedSecondaryTab?.kind === "git-diff") {
-      closeSecondaryPanel();
+      handleCloseSecondaryPanel();
     } else {
       openSecondaryPanelDiffPanel();
     }

@@ -33,6 +33,10 @@ import {
   resolveConversationCollapseControl,
   resolveWorkModeControl,
 } from "./panelToggleControlState";
+import {
+  CONVERSATION_RAIL_MIN_SIZE_PERCENT,
+  WORK_SURFACE_MIN_SIZE_PERCENT,
+} from "@/views/thread-detail/threadWorkMode";
 import { SecondaryPanelHostLayoutContext } from "./SecondaryPanelHostLayoutContext";
 import { SecondaryPanelTabStrip } from "./SecondaryPanelTabStrip";
 import type {
@@ -95,8 +99,6 @@ export type { SecondaryPanelFileTab } from "./secondaryPanelFileTab";
 // within the same bounds as the real panel it stands in for.
 export const THREAD_SECONDARY_PANEL_MIN_SIZE_PERCENT = 24;
 export const THREAD_SECONDARY_PANEL_MAX_SIZE_PERCENT = 70;
-const WORK_SURFACE_MIN_SIZE_PERCENT = 40;
-const CONVERSATION_RAIL_MIN_SIZE_PERCENT = 24;
 
 export function isSecondaryPanelLayoutTransition(
   propertyName: string,
@@ -207,10 +209,14 @@ interface ResolveActiveFixedPanelArgs {
   canUseGitUi: boolean;
 }
 
-export function resolveSecondaryPanelHideControl() {
+export function resolveSecondaryPanelHideControl(args?: {
+  isPrimaryWorkSurface?: boolean;
+}) {
   return {
     iconName: "PanelRight" as const,
-    label: "Hide right panel",
+    label: args?.isPrimaryWorkSurface
+      ? "Hide work surface"
+      : "Hide right panel",
   };
 }
 
@@ -388,9 +394,10 @@ export function ThreadSecondaryPanel({
   const hasActiveFileTab = activeFileTab !== undefined;
   const isTerminalTabActive =
     activeTab?.kind === "terminal" && hasActiveFileTab;
-  const hideControl = resolveSecondaryPanelHideControl();
-  // Standalone Thread detail uses the Work mode control. Hosted split panes
-  // keep the resource-only full-screen control until BB-6.
+  const isPrimaryWorkSurface = isWorkMode && onToggleWorkMode !== undefined;
+  const hideControl = resolveSecondaryPanelHideControl({
+    isPrimaryWorkSurface,
+  });
   const conversationCollapseControl =
     renderAsDrawer || !showConversationCollapseControl
       ? null
@@ -403,7 +410,6 @@ export function ThreadSecondaryPanel({
             isConversationCollapsed,
             onToggleConversationCollapse,
           });
-  const isPrimaryWorkSurface = isWorkMode && onToggleWorkMode !== undefined;
   const {
     gitDiffDisplayMode,
     handleGitDiffDisplayModeChange,
@@ -688,7 +694,9 @@ export function ThreadSecondaryPanel({
             // would be malformed. Toolbar semantics describe this compact row
             // without claiming the unimplemented tab contract.
             role="toolbar"
-            aria-label="Right panel views"
+            aria-label={
+              isPrimaryWorkSurface ? "Work surface views" : "Right panel views"
+            }
           >
             {showInfoTab ? (
               <PinnedIconTab

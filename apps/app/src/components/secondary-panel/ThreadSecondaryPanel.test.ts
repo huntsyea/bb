@@ -26,6 +26,15 @@ describe("secondary panel hide control", () => {
       label: "Hide right panel",
     });
   });
+
+  it("names the hide control for a primary work surface", () => {
+    expect(
+      resolveSecondaryPanelHideControl({ isPrimaryWorkSurface: true }),
+    ).toEqual({
+      iconName: "PanelRight",
+      label: "Hide work surface",
+    });
+  });
 });
 
 describe("secondary panel native browser bounds settling", () => {
