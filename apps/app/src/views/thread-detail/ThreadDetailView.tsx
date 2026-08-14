@@ -151,11 +151,13 @@ import {
 } from "./threadWorkMode";
 import {
   WORK_MODE_NO_SURFACE_NOTICE,
+  createWorkSurfaceSnapshot,
   hasEligibleWorkSurface,
   isEligibleWorkSurface,
   reconcileThreadWorkModeSurfaces,
   recordEligibleWorkSurfaceRecency,
   resolveEnterThreadWorkMode,
+  resolveWorkSurfaceSnapshotForThread,
 } from "./workSurfaceEligibility";
 import {
   HostFilePreviewTabContent,
@@ -1389,16 +1391,25 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   const surfaceArrangement = resolveThreadSurfaceArrangement(
     resolveThreadPresentationMode(isWorkModeActive),
   );
-  const previousWorkSurfaceRef = useRef<{
-    activeTabId: string | null;
-    wasEligible: boolean;
-  }>({
-    activeTabId: activeFixedSecondaryTabId,
-    wasEligible:
-      activeFixedSecondaryTab !== null &&
-      isEligibleWorkSurface(activeFixedSecondaryTab),
-  });
+  const previousWorkSurfaceRef = useRef(
+    createWorkSurfaceSnapshot({
+      activeTab: activeFixedSecondaryTab,
+      threadId,
+    }),
+  );
+  const resetWorkSurfaceSnapshotIfThreadChanged = useCallback(() => {
+    const resolved = resolveWorkSurfaceSnapshotForThread({
+      activeTab: activeFixedSecondaryTab,
+      snapshot: previousWorkSurfaceRef.current,
+      threadId,
+    });
+    previousWorkSurfaceRef.current = resolved.snapshot;
+    return resolved.didReset;
+  }, [activeFixedSecondaryTab, threadId]);
   useEffect(() => {
+    if (resetWorkSurfaceSnapshotIfThreadChanged()) {
+      return;
+    }
     const activeTab = activeFixedSecondaryTab;
     if (activeTab === null || !isEligibleWorkSurface(activeTab)) {
       return;
@@ -1420,9 +1431,13 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   }, [
     activeFixedSecondaryTab,
     fixedPanelTabsState.secondary.tabs,
+    resetWorkSurfaceSnapshotIfThreadChanged,
     setWorkSurfaceRecencyTabIds,
   ]);
   useEffect(() => {
+    if (resetWorkSurfaceSnapshotIfThreadChanged()) {
+      return;
+    }
     const result = reconcileThreadWorkModeSurfaces({
       activeTabId: activeFixedSecondaryTabId,
       isWorkMode,
@@ -1436,12 +1451,10 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
       appToast.message(WORK_MODE_NO_SURFACE_NOTICE, {
         id: `thread-work-mode-exit:${threadId}`,
       });
-      previousWorkSurfaceRef.current = {
-        activeTabId: activeFixedSecondaryTabId,
-        wasEligible:
-          activeFixedSecondaryTab !== null &&
-          isEligibleWorkSurface(activeFixedSecondaryTab),
-      };
+      previousWorkSurfaceRef.current = createWorkSurfaceSnapshot({
+        activeTab: activeFixedSecondaryTab,
+        threadId,
+      });
       return;
     }
     if (
@@ -1458,17 +1471,17 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
         : (fixedPanelTabsState.secondary.tabs.find(
             (tab) => tab.id === nextActiveTabId,
           ) ?? null);
-    previousWorkSurfaceRef.current = {
-      activeTabId: nextActiveTabId,
-      wasEligible:
-        nextActiveTab !== null && isEligibleWorkSurface(nextActiveTab),
-    };
+    previousWorkSurfaceRef.current = createWorkSurfaceSnapshot({
+      activeTab: nextActiveTab,
+      threadId,
+    });
   }, [
     activateTab,
     activeFixedSecondaryTab,
     activeFixedSecondaryTabId,
     fixedPanelTabsState.secondary.tabs,
     isWorkMode,
+    resetWorkSurfaceSnapshotIfThreadChanged,
     setIsWorkMode,
     threadId,
     workSurfaceRecencyTabIds,
@@ -2967,6 +2980,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
           }}
           secondaryPanel={{
             activeTab: activeFixedSecondaryTab,
+            canEnterWorkMode: hasEligibleSurface,
             canUseGitUi,
             environmentId: thread.environmentId ?? undefined,
             workspaceRootPath: environment?.path,

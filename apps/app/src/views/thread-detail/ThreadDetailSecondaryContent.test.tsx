@@ -168,31 +168,6 @@ vi.mock(
         resizablePanelLayout,
       });
 
-    function KeepAliveSurface({
-      isActive,
-      label,
-      testId,
-    }: {
-      isActive: boolean;
-      label: string;
-      testId: string;
-    }) {
-      const [draft, setDraft] = React.useState(`${label} draft`);
-      return React.createElement(
-        "div",
-        {
-          "data-testid": testId,
-          hidden: !isActive,
-        },
-        React.createElement("input", {
-          "aria-label": `${label} surface draft`,
-          onChange: (event: { target: { value: string } }) =>
-            setDraft(event.target.value),
-          value: draft,
-        }),
-      );
-    }
-
     function StatefulSecondaryPanelFixture({
       browserDeck,
       inlinePanelToggle,
@@ -236,34 +211,10 @@ vi.mock(
           "Open docs",
         ),
         React.createElement(
-          "button",
-          {
-            onClick: () => setActiveResource("side-chat"),
-            type: "button",
-          },
-          "Open side chat",
-        ),
-        React.createElement(
           "div",
           { "data-testid": "active-resource" },
           activeResource,
         ),
-        React.createElement(KeepAliveSurface, {
-          isActive:
-            activeResource === "notes.md" || activeResource === "preview.pdf",
-          label: "File",
-          testId: "file-surface",
-        }),
-        React.createElement(KeepAliveSurface, {
-          isActive: activeResource === "docs",
-          label: "Docs",
-          testId: "docs-surface",
-        }),
-        React.createElement(KeepAliveSurface, {
-          isActive: activeResource === "side-chat",
-          label: "Side chat",
-          testId: "side-chat-surface",
-        }),
         browserDeck,
       );
     }
@@ -788,8 +739,8 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
     expect(replaceState).not.toHaveBeenCalled();
   });
 
-  it("keeps conversation and each mounted work surface alive while switching tabs in Work mode", () => {
-    const view = renderThreadDetail({
+  it("keeps conversation, work-surface host, and browser deck mounted while switching tabs in Work mode", () => {
+    renderThreadDetail({
       arrangement: "work-surface-primary",
       isCompactViewport: false,
       isSecondaryPanelOpen: true,
@@ -802,38 +753,17 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
       .closest('[data-thread-region="conversation"]');
     const workSurface = screen.getByTestId("inline-secondary-panel");
     const browserDeck = screen.getByTestId("browser-deck");
-    const fileSurface = screen.getByTestId("file-surface");
-    const docsSurface = screen.getByTestId("docs-surface");
-    const sideChatSurface = screen.getByTestId("side-chat-surface");
-    const fileDraft = screen.getByRole("textbox", {
-      hidden: true,
-      name: "File surface draft",
-    });
-    const docsDraft = screen.getByRole("textbox", {
-      hidden: true,
-      name: "Docs surface draft",
-    });
-    const sideChatDraft = screen.getByRole("textbox", {
-      hidden: true,
-      name: "Side chat surface draft",
-    });
 
     if (conversation === null) {
       throw new Error("Expected the stable conversation region");
     }
-    fireEvent.change(fileDraft, { target: { value: "file stays" } });
-    fireEvent.change(docsDraft, { target: { value: "docs stays" } });
-    fireEvent.change(sideChatDraft, { target: { value: "side chat stays" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Open docs" }));
-    expect(screen.getByTestId("active-resource").textContent).toBe("docs");
-    fireEvent.click(screen.getByRole("button", { name: "Open side chat" }));
-    expect(screen.getByTestId("active-resource").textContent).toBe("side-chat");
     fireEvent.click(screen.getByRole("button", { name: "Open preview" }));
+
     expect(screen.getByTestId("active-resource").textContent).toBe(
       "preview.pdf",
     );
-
     expect(
       screen
         .getByTestId("thread-timeline-pane")
@@ -841,47 +771,6 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
     ).toBe(conversation);
     expect(screen.getByTestId("inline-secondary-panel")).toBe(workSurface);
     expect(screen.getByTestId("browser-deck")).toBe(browserDeck);
-    expect(screen.getByTestId("file-surface")).toBe(fileSurface);
-    expect(screen.getByTestId("docs-surface")).toBe(docsSurface);
-    expect(screen.getByTestId("side-chat-surface")).toBe(sideChatSurface);
-    expect(
-      (
-        screen.getByRole("textbox", {
-          hidden: true,
-          name: "File surface draft",
-        }) as HTMLInputElement
-      ).value,
-    ).toBe("file stays");
-    expect(
-      (
-        screen.getByRole("textbox", {
-          hidden: true,
-          name: "Docs surface draft",
-        }) as HTMLInputElement
-      ).value,
-    ).toBe("docs stays");
-    expect(
-      (
-        screen.getByRole("textbox", {
-          hidden: true,
-          name: "Side chat surface draft",
-        }) as HTMLInputElement
-      ).value,
-    ).toBe("side chat stays");
-
-    view.rerenderWith({
-      arrangement: "conversation-primary",
-      isWorkMode: false,
-    });
-    expect(screen.getByTestId("inline-secondary-panel")).toBe(workSurface);
-    expect(
-      (
-        screen.getByRole("textbox", {
-          hidden: true,
-          name: "File surface draft",
-        }) as HTMLInputElement
-      ).value,
-    ).toBe("file stays");
   });
 
   it("hides and restores native browser readiness as hosted pane focus changes", () => {

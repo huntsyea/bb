@@ -13,6 +13,7 @@ afterEach(cleanup);
 const noop = () => {};
 
 function renderPanel(args: {
+  canEnterWorkMode?: boolean;
   isConversationCollapsed: boolean;
   onToggleConversationCollapse: () => void;
   isWorkMode?: boolean;
@@ -102,6 +103,22 @@ describe("ThreadSecondaryPanel Work mode control", () => {
 
     fireEvent.click(control);
     expect(onToggleWorkMode).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables Enter Work mode when no eligible surface is open", () => {
+    const onToggleWorkMode = vi.fn();
+    const view = renderPanel({
+      canEnterWorkMode: false,
+      isConversationCollapsed: false,
+      onToggleConversationCollapse: noop,
+      onToggleWorkMode,
+    });
+
+    const control = view.getByRole("button", { name: "Enter Work mode" });
+    expect(control).toHaveProperty("disabled", true);
+
+    fireEvent.click(control);
+    expect(onToggleWorkMode).not.toHaveBeenCalled();
   });
 
   it("renames the hide control while the work surface is primary", () => {

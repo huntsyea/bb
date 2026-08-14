@@ -54,6 +54,7 @@ const PANEL_TOGGLE_ACTION_PRESENTATION = {
 
 export interface PanelToggleControlState {
   action: PanelToggleAction;
+  disabled?: boolean;
   label: string;
   isPressed: boolean;
   iconName: PanelToggleIconName;
@@ -100,6 +101,7 @@ export function resolveConversationCollapseControl({
 }
 
 export interface ResolveWorkModeControlArgs {
+  canEnterWorkMode?: boolean;
   isWorkMode: boolean;
   onToggleWorkMode: () => void;
 }
@@ -109,6 +111,7 @@ export interface ResolveWorkModeControlArgs {
  * existing work surface; restore returns to Conversation mode.
  */
 export function resolveWorkModeControl({
+  canEnterWorkMode = true,
   isWorkMode,
   onToggleWorkMode,
 }: ResolveWorkModeControlArgs): PanelToggleControlState {
@@ -118,6 +121,7 @@ export function resolveWorkModeControl({
   return {
     action,
     ...PANEL_TOGGLE_ACTION_PRESENTATION[action],
+    disabled: !isWorkMode && !canEnterWorkMode,
     onClick: onToggleWorkMode,
   };
 }

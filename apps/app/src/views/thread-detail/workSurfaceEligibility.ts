@@ -3,11 +3,7 @@ import type { FixedPanelTab } from "@/lib/fixed-panel-tabs-state";
 export const WORK_MODE_NO_SURFACE_NOTICE =
   "Returned to Conversation because no work surface is open.";
 
-/**
- * Host-owned Work mode eligibility. Decides from tab kind only — never from
- * plugin identity or plugin content — so Docs, Side chat, and any other
- * plugin panel participate without a registration field.
- */
+/** Eligibility is tab kind only. */
 export function isEligibleWorkSurface(
   tab: Pick<FixedPanelTab, "kind">,
 ): boolean {
@@ -70,10 +66,6 @@ export interface EnterThreadWorkModeResolution {
   canEnter: boolean;
 }
 
-/**
- * Chooses the surface that should be primary when entering Work mode.
- * Does not attach work-surface identity or contents to prompt context.
- */
 export function resolveEnterThreadWorkMode(args: {
   activeTabId: string | null;
   recencyTabIds: readonly string[];
@@ -102,13 +94,41 @@ export type WorkModeSurfaceReconciliation =
   | { activeTabId: string; kind: "activate" }
   | { kind: "exit" };
 
-/**
- * Reconciles Work mode after a tab open, switch, close, or prune.
- *
- * A newly opened or user-selected tab is kept. Losing the active eligible
- * surface selects the most recently used remaining eligible tab. Losing the
- * last eligible surface exits Work mode.
- */
+export interface WorkSurfaceSnapshot {
+  activeTabId: string | null;
+  threadId: string;
+  wasEligible: boolean;
+}
+
+export function createWorkSurfaceSnapshot(args: {
+  activeTab: Pick<FixedPanelTab, "id" | "kind"> | null;
+  threadId: string;
+}): WorkSurfaceSnapshot {
+  return {
+    activeTabId: args.activeTab?.id ?? null,
+    threadId: args.threadId,
+    wasEligible:
+      args.activeTab !== null && isEligibleWorkSurface(args.activeTab),
+  };
+}
+
+export function resolveWorkSurfaceSnapshotForThread(args: {
+  activeTab: Pick<FixedPanelTab, "id" | "kind"> | null;
+  snapshot: WorkSurfaceSnapshot;
+  threadId: string;
+}): { didReset: boolean; snapshot: WorkSurfaceSnapshot } {
+  if (args.snapshot.threadId === args.threadId) {
+    return { didReset: false, snapshot: args.snapshot };
+  }
+  return {
+    didReset: true,
+    snapshot: createWorkSurfaceSnapshot({
+      activeTab: args.activeTab,
+      threadId: args.threadId,
+    }),
+  };
+}
+
 export function reconcileThreadWorkModeSurfaces(args: {
   activeTabId: string | null;
   isWorkMode: boolean;

@@ -33,9 +33,22 @@ describe("resolveWorkModeControl", () => {
     expect(state.label).toBe("Enter Work mode");
     expect(state.isPressed).toBe(false);
     expect(state.iconName).toBe("Maximize2");
+    expect(state.disabled).toBe(false);
 
     state.onClick();
     expect(onToggleWorkMode).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables Enter Work mode when no eligible surface is open", () => {
+    const onToggleWorkMode = vi.fn();
+    const state = resolveWorkModeControl({
+      canEnterWorkMode: false,
+      isWorkMode: false,
+      onToggleWorkMode,
+    });
+
+    expect(state.action).toBe("enter-work-mode");
+    expect(state.disabled).toBe(true);
   });
 
   it("restores Conversation mode from the same control", () => {

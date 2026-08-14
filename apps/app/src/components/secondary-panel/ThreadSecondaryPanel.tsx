@@ -314,6 +314,7 @@ export interface ThreadSecondaryPanelProps {
    * enter/restore Work mode control instead of resource-only full screen.
    */
   isWorkMode?: boolean;
+  canEnterWorkMode?: boolean;
   onToggleWorkMode?: () => void;
   /**
    * When true, render only the aside content — skip the PanelResizeHandle +
@@ -383,6 +384,7 @@ export function ThreadSecondaryPanel({
   isConversationCollapsed,
   onToggleConversationCollapse,
   isWorkMode = false,
+  canEnterWorkMode = true,
   onToggleWorkMode,
   renderAsDrawer,
 }: ThreadSecondaryPanelProps) {
@@ -403,6 +405,7 @@ export function ThreadSecondaryPanel({
       ? null
       : onToggleWorkMode
         ? resolveWorkModeControl({
+            canEnterWorkMode,
             isWorkMode,
             onToggleWorkMode,
           })
@@ -762,6 +765,7 @@ export function ThreadSecondaryPanel({
                     onClick={conversationCollapseControl.onClick}
                     aria-label={conversationCollapseControl.label}
                     aria-pressed={conversationCollapseControl.isPressed}
+                    disabled={conversationCollapseControl.disabled}
                     data-testid="thread-work-mode-toggle"
                   >
                     <Icon name={conversationCollapseControl.iconName} />

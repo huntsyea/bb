@@ -21,6 +21,7 @@ import {
   reconcileThreadWorkModeSurfaces,
   recordEligibleWorkSurfaceRecency,
   resolveEnterThreadWorkMode,
+  resolveWorkSurfaceSnapshotForThread,
   selectMostRecentlyUsedEligibleWorkSurface,
 } from "./workSurfaceEligibility";
 
@@ -251,6 +252,38 @@ describe("workSurfaceEligibility", () => {
         tabs: [info, fileA, browser],
       }),
     ).toEqual({ activeTabId: browser.id, kind: "keep" });
+  });
+
+  it("does not treat a Thread switch as losing the previous eligible surface", () => {
+    const fileOnA = workspaceFile("a.ts");
+    const fileOnB = workspaceFile("other.ts");
+    const newTab = createNewTabFixedPanelTab();
+    const resolved = resolveWorkSurfaceSnapshotForThread({
+      activeTab: newTab,
+      snapshot: {
+        activeTabId: fileOnA.id,
+        threadId: "thr-a",
+        wasEligible: true,
+      },
+      threadId: "thr-b",
+    });
+
+    expect(resolved.didReset).toBe(true);
+    expect(resolved.snapshot).toEqual({
+      activeTabId: newTab.id,
+      threadId: "thr-b",
+      wasEligible: false,
+    });
+    expect(
+      reconcileThreadWorkModeSurfaces({
+        activeTabId: newTab.id,
+        isWorkMode: true,
+        previousActiveTabId: resolved.snapshot.activeTabId,
+        previousWasEligible: resolved.snapshot.wasEligible,
+        recencyTabIds: [fileOnB.id],
+        tabs: [newTab, fileOnB],
+      }),
+    ).toEqual({ activeTabId: newTab.id, kind: "keep" });
   });
 
   it("keeps New tab visible in Work mode while another eligible surface remains", () => {
