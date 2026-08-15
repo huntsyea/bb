@@ -5,6 +5,20 @@ export type ThreadPresentationMode = "conversation" | "work";
 export const DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT = 36;
 export const CONVERSATION_RAIL_MIN_SIZE_PERCENT = 24;
 export const WORK_SURFACE_MIN_SIZE_PERCENT = 40;
+export const CONVERSATION_RAIL_MAX_SIZE_PERCENT =
+  100 - WORK_SURFACE_MIN_SIZE_PERCENT;
+
+export function constrainConversationRailWidthPercent(
+  widthPercent: number,
+): number {
+  if (!Number.isFinite(widthPercent)) {
+    return DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT;
+  }
+  return Math.min(
+    CONVERSATION_RAIL_MAX_SIZE_PERCENT,
+    Math.max(CONVERSATION_RAIL_MIN_SIZE_PERCENT, widthPercent),
+  );
+}
 
 export function resolveThreadPresentationMode(
   isWorkMode: boolean,
@@ -51,9 +65,12 @@ export function resolveThreadWorkModeLayoutSizes(args: {
     };
   }
   if (args.isWorkMode) {
+    const conversationSizePercent = constrainConversationRailWidthPercent(
+      args.conversationRailWidthPercent,
+    );
     return {
-      conversationSizePercent: args.conversationRailWidthPercent,
-      workSurfaceSizePercent: 100 - args.conversationRailWidthPercent,
+      conversationSizePercent,
+      workSurfaceSizePercent: 100 - conversationSizePercent,
     };
   }
   return {
@@ -70,5 +87,5 @@ export function resolveConversationRailWidthUpdate(args: {
   if (!args.isWorkMode || !args.isUserResizing || args.sizePercent <= 0) {
     return null;
   }
-  return args.sizePercent;
+  return constrainConversationRailWidthPercent(args.sizePercent);
 }

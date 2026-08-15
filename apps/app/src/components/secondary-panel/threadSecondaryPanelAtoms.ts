@@ -1,8 +1,21 @@
 import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 import { atomFamily } from "jotai-family";
-import { createLocalStorageSyncStorage } from "@/lib/browser-storage";
+import {
+  createLocalStorageSyncStorage,
+  type SyncStorage,
+} from "@/lib/browser-storage";
 import { DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT } from "@/views/thread-detail/threadWorkMode";
+import {
+  CONVERSATION_RAIL_WIDTH_STORAGE_KEY,
+  DEFAULT_THREAD_PRESENTATION_STATE,
+  getThreadPresentationStateStorageKey,
+  parseConversationRailWidthPercent,
+  serializeThreadPresentationState,
+  threadIdFromPresentationStorageKey,
+  resolveStoredThreadPresentationState,
+  type ThreadPresentationState,
+} from "@/views/thread-detail/threadPresentationState";
 
 export const threadSecondaryPanelResizingAtom = atom(false);
 
@@ -118,14 +131,127 @@ export function getThreadConversationCollapsedAtom(
     : disabledThreadConversationCollapsedAtom;
 }
 
-const threadWorkModeAtomFamily = atomFamily((_threadId: string) => atom(false));
+function readLegacyCollapsedStoredValue(threadId: string): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return window.localStorage.getItem(
+    getThreadConversationCollapsedStorageKey({ threadId }),
+  );
+}
+
+const threadPresentationStateStorage: SyncStorage<ThreadPresentationState> = {
+  getItem: (key, initialValue) => {
+    if (typeof window === "undefined") {
+      return initialValue;
+    }
+    const threadId = threadIdFromPresentationStorageKey(key);
+    return resolveStoredThreadPresentationState({
+      storedValue: window.localStorage.getItem(key),
+      legacyCollapsedStoredValue:
+        threadId === null ? null : readLegacyCollapsedStoredValue(threadId),
+    });
+  },
+  setItem: (key, value) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(key, serializeThreadPresentationState(value));
+  },
+  removeItem: (key) => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.removeItem(key);
+  },
+  subscribe: (key, callback) => {
+    if (typeof window === "undefined") {
+      return () => {};
+    }
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage || event.key !== key) {
+        return;
+      }
+      const threadId = threadIdFromPresentationStorageKey(key);
+      callback(
+        resolveStoredThreadPresentationState({
+          storedValue: event.newValue,
+          legacyCollapsedStoredValue:
+            threadId === null ? null : readLegacyCollapsedStoredValue(threadId),
+        }),
+      );
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
+  },
+};
+
+const threadPresentationStateAtomFamily = atomFamily(
+  (threadId: ResolvedThreadSecondaryPanelThreadId) =>
+    atomWithStorage<ThreadPresentationState>(
+      getThreadPresentationStateStorageKey({ threadId }),
+      DEFAULT_THREAD_PRESENTATION_STATE,
+      threadPresentationStateStorage,
+      { getOnInit: true },
+    ),
+);
+
+const disabledThreadPresentationStateAtom = atom(
+  DEFAULT_THREAD_PRESENTATION_STATE,
+);
+
+/**
+ * Client-local Work mode presentation for a Thread: mode, last eligible
+ * surface, and recency. Persisted per Thread in localStorage so reload and
+ * Thread switches restore only that Thread's layout on this client.
+ */
+export function getThreadPresentationStateAtom(
+  threadId: ThreadSecondaryPanelThreadId,
+) {
+  return hasThreadId(threadId)
+    ? threadPresentationStateAtomFamily(threadId)
+    : disabledThreadPresentationStateAtom;
+}
+
+function resolvePresentationUpdate<T>(
+  update: T | ((current: T) => T),
+  current: T,
+): T {
+  return typeof update === "function"
+    ? (update as (current: T) => T)(current)
+    : update;
+}
+
+const threadWorkModeAtomFamily = atomFamily(
+  (threadId: ResolvedThreadSecondaryPanelThreadId) =>
+    atom(
+      (get) => get(threadPresentationStateAtomFamily(threadId)).mode === "work",
+      (get, set, update: boolean | ((current: boolean) => boolean)) => {
+        const presentationAtom = threadPresentationStateAtomFamily(threadId);
+        const current = get(presentationAtom);
+        const isWorkMode = current.mode === "work";
+        const next = resolvePresentationUpdate(update, isWorkMode);
+        if (next === isWorkMode) {
+          return;
+        }
+        set(presentationAtom, {
+          ...current,
+          mode: next ? "work" : "conversation",
+          activeEligibleTabId: next
+            ? (current.recencyTabIds[0] ?? current.activeEligibleTabId)
+            : current.activeEligibleTabId,
+        });
+      },
+    ),
+);
 
 const disabledThreadWorkModeAtom = atom(false);
 
 /**
- * Client-local Work mode flag for a Thread. Persistence and legacy
- * full-screen migration belong to BB-5; this atom only keeps the
- * presentation for the current app session.
+ * Client-local Work mode flag for a Thread. Backed by persisted presentation
+ * state so reload restores this client's last valid mode.
  */
 export function getThreadWorkModeAtom(threadId: ThreadSecondaryPanelThreadId) {
   return hasThreadId(threadId)
@@ -133,15 +259,32 @@ export function getThreadWorkModeAtom(threadId: ThreadSecondaryPanelThreadId) {
     : disabledThreadWorkModeAtom;
 }
 
-const threadWorkSurfaceRecencyAtomFamily = atomFamily((_threadId: string) =>
-  atom<string[]>([]),
+const threadWorkSurfaceRecencyAtomFamily = atomFamily(
+  (threadId: ResolvedThreadSecondaryPanelThreadId) =>
+    atom(
+      (get) => get(threadPresentationStateAtomFamily(threadId)).recencyTabIds,
+      (get, set, update: string[] | ((current: string[]) => string[])) => {
+        const presentationAtom = threadPresentationStateAtomFamily(threadId);
+        const current = get(presentationAtom);
+        const next = resolvePresentationUpdate(update, current.recencyTabIds);
+        if (next === current.recencyTabIds) {
+          return;
+        }
+        set(presentationAtom, {
+          ...current,
+          recencyTabIds: next,
+          activeEligibleTabId: next[0] ?? current.activeEligibleTabId,
+        });
+      },
+    ),
 );
 
 const disabledThreadWorkSurfaceRecencyAtom = atom<string[]>([]);
 
 /**
  * Client-local most-recently-used eligible work-surface ids for a Thread.
- * Newest first. Session-local until BB-5 persists presentation state.
+ * Newest first. Persisted with the Thread's presentation so reload can fall
+ * back by recent use.
  */
 export function getThreadWorkSurfaceRecencyAtom(
   threadId: ThreadSecondaryPanelThreadId,
@@ -151,11 +294,23 @@ export function getThreadWorkSurfaceRecencyAtom(
     : disabledThreadWorkSurfaceRecencyAtom;
 }
 
+const conversationRailWidthStorage = createLocalStorageSyncStorage<number>({
+  parse: (storedValue, initialValue) =>
+    parseConversationRailWidthPercent(storedValue, initialValue),
+  serialize: (value) => String(value),
+});
+
 /**
- * Preferred conversation-rail width while Work mode is active. Independent
- * from {@link secondaryPanelWidthPercentAtom} so switching modes does not
- * overwrite either preference. Session-local until BB-5 persists it.
+ * Preferred conversation-rail width while Work mode is active. One
+ * client-wide value, independent from {@link secondaryPanelWidthPercentAtom}
+ * so switching modes does not overwrite either preference. Responsive
+ * min/max constraints are applied at render time.
  */
-export const conversationRailWidthPercentAtom = atom(
+export const conversationRailWidthPercentAtom = atomWithStorage<number>(
+  CONVERSATION_RAIL_WIDTH_STORAGE_KEY,
   DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT,
+  conversationRailWidthStorage,
+  { getOnInit: true },
 );
+
+export { CONVERSATION_RAIL_WIDTH_STORAGE_KEY };

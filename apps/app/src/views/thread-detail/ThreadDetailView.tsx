@@ -141,6 +141,7 @@ import type { HostConnectionNotice } from "./ThreadTimelinePane";
 import { useThreadStorageViewer } from "@/components/secondary-panel/useThreadStorageViewer";
 import {
   getThreadConversationCollapsedAtom,
+  getThreadPresentationStateAtom,
   getThreadWorkModeAtom,
   getThreadWorkSurfaceRecencyAtom,
 } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
@@ -149,6 +150,10 @@ import {
   resolveThreadPresentationMode,
   resolveThreadSurfaceArrangement,
 } from "./threadWorkMode";
+import {
+  areThreadPresentationStatesEqual,
+  restoreThreadPresentationState,
+} from "./threadPresentationState";
 import {
   WORK_MODE_NO_SURFACE_NOTICE,
   createWorkSurfaceSnapshot,
@@ -1376,6 +1381,9 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   const [workSurfaceRecencyTabIds, setWorkSurfaceRecencyTabIds] = useAtom(
     getThreadWorkSurfaceRecencyAtom(threadId),
   );
+  const [presentationState, setPresentationState] = useAtom(
+    getThreadPresentationStateAtom(threadId),
+  );
   const isStandaloneLayout = secondaryPanelHost === null;
   const hasEligibleSurface = hasEligibleWorkSurface(
     fixedPanelTabsState.secondary.tabs,
@@ -1397,6 +1405,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
       threadId,
     }),
   );
+  const restoredPresentationThreadIdRef = useRef<string | null>(null);
   const resetWorkSurfaceSnapshotIfThreadChanged = useCallback(() => {
     const resolved = resolveWorkSurfaceSnapshotForThread({
       activeTab: activeFixedSecondaryTab,
@@ -1435,7 +1444,38 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     setWorkSurfaceRecencyTabIds,
   ]);
   useEffect(() => {
-    if (resetWorkSurfaceSnapshotIfThreadChanged()) {
+    const didChangeThread = resetWorkSurfaceSnapshotIfThreadChanged();
+    if (restoredPresentationThreadIdRef.current !== threadId) {
+      restoredPresentationThreadIdRef.current = threadId;
+      const restored = restoreThreadPresentationState({
+        state: presentationState,
+        tabs: fixedPanelTabsState.secondary.tabs,
+      });
+      if (
+        !areThreadPresentationStatesEqual(presentationState, restored.state)
+      ) {
+        setPresentationState(restored.state);
+      }
+      if (
+        restored.state.mode === "work" &&
+        restored.activateTabId !== null &&
+        restored.activateTabId !== activeFixedSecondaryTabId
+      ) {
+        activateTab(restored.activateTabId);
+      }
+      const restoredTab =
+        restored.activateTabId === null
+          ? activeFixedSecondaryTab
+          : (fixedPanelTabsState.secondary.tabs.find(
+              (tab) => tab.id === restored.activateTabId,
+            ) ?? activeFixedSecondaryTab);
+      previousWorkSurfaceRef.current = createWorkSurfaceSnapshot({
+        activeTab: restoredTab,
+        threadId,
+      });
+      return;
+    }
+    if (didChangeThread) {
       return;
     }
     const result = reconcileThreadWorkModeSurfaces({
@@ -1481,8 +1521,10 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     activeFixedSecondaryTabId,
     fixedPanelTabsState.secondary.tabs,
     isWorkMode,
+    presentationState,
     resetWorkSurfaceSnapshotIfThreadChanged,
     setIsWorkMode,
+    setPresentationState,
     threadId,
     workSurfaceRecencyTabIds,
   ]);

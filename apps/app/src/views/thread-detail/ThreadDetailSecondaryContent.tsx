@@ -29,6 +29,7 @@ import {
 } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
 import {
   CONVERSATION_RAIL_MIN_SIZE_PERCENT,
+  constrainConversationRailWidthPercent,
   resolveConversationRailWidthUpdate,
   resolveThreadWorkModeLayoutSizes,
 } from "./threadWorkMode";
@@ -299,7 +300,9 @@ function ThreadDetailSecondaryContentBody({
       return;
     }
     if (isWorkModeActive) {
-      const railWidth = conversationRailWidthRef.current;
+      const railWidth = constrainConversationRailWidthPercent(
+        conversationRailWidthRef.current,
+      );
       group.setLayout([100 - railWidth, railWidth]);
       return;
     }

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  CONVERSATION_RAIL_MAX_SIZE_PERCENT,
+  CONVERSATION_RAIL_MIN_SIZE_PERCENT,
   DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT,
   canEnterThreadWorkMode,
+  constrainConversationRailWidthPercent,
   resolveConversationRailWidthUpdate,
   resolveThreadSurfaceArrangement,
   resolveThreadWorkModeLayoutSizes,
@@ -110,5 +113,43 @@ describe("threadWorkMode", () => {
         sizePercent: 42,
       }),
     ).toBeNull();
+  });
+
+  it("constrains the conversation rail at render time without changing the secondary-panel width", () => {
+    expect(constrainConversationRailWidthPercent(10)).toBe(
+      CONVERSATION_RAIL_MIN_SIZE_PERCENT,
+    );
+    expect(constrainConversationRailWidthPercent(80)).toBe(
+      CONVERSATION_RAIL_MAX_SIZE_PERCENT,
+    );
+    expect(
+      resolveThreadWorkModeLayoutSizes({
+        isWorkMode: true,
+        isSecondaryPanelOpen: true,
+        conversationRailWidthPercent: 12,
+        secondaryPanelWidthPercent: 55,
+      }),
+    ).toEqual({
+      conversationSizePercent: CONVERSATION_RAIL_MIN_SIZE_PERCENT,
+      workSurfaceSizePercent: 100 - CONVERSATION_RAIL_MIN_SIZE_PERCENT,
+    });
+    expect(
+      resolveThreadWorkModeLayoutSizes({
+        isWorkMode: false,
+        isSecondaryPanelOpen: true,
+        conversationRailWidthPercent: 12,
+        secondaryPanelWidthPercent: 55,
+      }),
+    ).toEqual({
+      conversationSizePercent: 45,
+      workSurfaceSizePercent: 55,
+    });
+    expect(
+      resolveConversationRailWidthUpdate({
+        isWorkMode: true,
+        isUserResizing: true,
+        sizePercent: 88,
+      }),
+    ).toBe(CONVERSATION_RAIL_MAX_SIZE_PERCENT);
   });
 });
