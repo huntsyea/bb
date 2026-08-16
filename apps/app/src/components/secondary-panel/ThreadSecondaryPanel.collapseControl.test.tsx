@@ -6,18 +6,42 @@ import { PanelGroup } from "react-resizable-panels";
 import { TooltipProvider } from "@bb/shared-ui/tooltip";
 import { createThreadInfoFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
+import {
+  CONVERSATION_DRAWER_CONTROL_LABEL,
+  CONVERSATION_PENDING_INDICATOR_LABEL,
+} from "./panelToggleControlState";
 import { ThreadSecondaryPanel } from "./ThreadSecondaryPanel";
 
 afterEach(cleanup);
 
 const noop = () => {};
 
+/**
+ * A native button is activated from the keyboard by Enter or Space, which the
+ * browser delivers as a click event with `detail === 0`. Pointer clicks carry a
+ * non-zero detail, so this distinguishes keyboard-only operation.
+ */
+function pressWithKeyboard(control: HTMLElement) {
+  control.focus();
+  expect(document.activeElement).toBe(control);
+  expect(control.tagName).toBe("BUTTON");
+  expect(control.tabIndex).toBeGreaterThanOrEqual(0);
+  fireEvent.click(control, { detail: 0 });
+}
+
 function renderPanel(args: {
   canEnterWorkMode?: boolean;
+  conversationDrawer?: {
+    hasPendingInteraction: boolean;
+    isOpen: boolean;
+    onToggle: () => void;
+  };
   isConversationCollapsed: boolean;
   onToggleConversationCollapse: () => void;
   isWorkMode?: boolean;
   onToggleWorkMode?: () => void;
+  withoutResizablePanel?: boolean;
+  workModeToggleId?: string;
 }) {
   const { wrapper: Wrapper } = createQueryClientTestHarness();
   return render(
@@ -152,6 +176,142 @@ describe("ThreadSecondaryPanel Work mode control", () => {
 
     fireEvent.click(control);
     expect(onToggleWorkMode).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the layout owner's id so focus can survive the enter/restore swap", () => {
+    const view = renderPanel({
+      isConversationCollapsed: false,
+      onToggleConversationCollapse: noop,
+      onToggleWorkMode: noop,
+      workModeToggleId: "thread-work-mode-toggle-pane-1",
+    });
+
+    expect(view.getByRole("button", { name: "Enter Work mode" }).id).toBe(
+      "thread-work-mode-toggle-pane-1",
+    );
+  });
+
+  it("operates from the keyboard in both states", () => {
+    const onEnter = vi.fn();
+    const enterView = renderPanel({
+      isConversationCollapsed: false,
+      onToggleConversationCollapse: noop,
+      onToggleWorkMode: onEnter,
+    });
+    pressWithKeyboard(
+      enterView.getByRole("button", { name: "Enter Work mode" }),
+    );
+    expect(onEnter).toHaveBeenCalledTimes(1);
+
+    cleanup();
+
+    const onRestore = vi.fn();
+    const restoreView = renderPanel({
+      isConversationCollapsed: false,
+      isWorkMode: true,
+      onToggleConversationCollapse: noop,
+      onToggleWorkMode: onRestore,
+    });
+    pressWithKeyboard(
+      restoreView.getByRole("button", { name: "Restore Conversation" }),
+    );
+    expect(onRestore).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Compact Work mode inverts the drawer: the work surface takes the page and
+// this control is the only way back to the conversation.
+describe("ThreadSecondaryPanel conversation drawer control", () => {
+  function renderWithDrawer(
+    drawer: Partial<{
+      hasPendingInteraction: boolean;
+      isOpen: boolean;
+      onToggle: () => void;
+    }> = {},
+  ) {
+    return renderPanel({
+      conversationDrawer: {
+        hasPendingInteraction: false,
+        isOpen: false,
+        onToggle: noop,
+        ...drawer,
+      },
+      isConversationCollapsed: false,
+      isWorkMode: true,
+      onToggleConversationCollapse: noop,
+      onToggleWorkMode: noop,
+      withoutResizablePanel: true,
+    });
+  }
+
+  it("names the drawer once and carries its open state separately", () => {
+    const closedView = renderWithDrawer({ isOpen: false });
+    const closed = closedView.getByRole("button", {
+      name: CONVERSATION_DRAWER_CONTROL_LABEL,
+    });
+    expect(closed.getAttribute("aria-expanded")).toBe("false");
+    expect(closed.getAttribute("aria-haspopup")).toBe("dialog");
+
+    cleanup();
+
+    const openView = renderWithDrawer({ isOpen: true });
+    const open = openView.getByRole("button", {
+      name: CONVERSATION_DRAWER_CONTROL_LABEL,
+    });
+    // The name is stable across states; aria-expanded alone reports the change.
+    expect(open.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("opens from the keyboard", () => {
+    const onToggle = vi.fn();
+    const view = renderWithDrawer({ onToggle });
+
+    pressWithKeyboard(
+      view.getByRole("button", { name: CONVERSATION_DRAWER_CONTROL_LABEL }),
+    );
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("describes the closed control with the waiting approval or question", () => {
+    const quietView = renderWithDrawer({ hasPendingInteraction: false });
+    expect(quietView.queryByRole("status")).toBeNull();
+    expect(
+      quietView
+        .getByRole("button", { name: CONVERSATION_DRAWER_CONTROL_LABEL })
+        .getAttribute("aria-describedby"),
+    ).toBeNull();
+
+    cleanup();
+
+    const pendingView = renderWithDrawer({
+      hasPendingInteraction: true,
+      isOpen: false,
+    });
+    const control = pendingView.getByRole("button", {
+      name: CONVERSATION_DRAWER_CONTROL_LABEL,
+    });
+    const describedBy = control.getAttribute("aria-describedby");
+    expect(describedBy).not.toBeNull();
+
+    const indicator = pendingView.getByRole("status");
+    expect(indicator.id).toBe(describedBy);
+    expect(indicator.textContent).toBe(CONVERSATION_PENDING_INDICATOR_LABEL);
+    // Purely an indication: the control stays closed and keeps its own name.
+    expect(control.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("stays out of the panel toolbar outside compact Work mode", () => {
+    const view = renderPanel({
+      isConversationCollapsed: false,
+      isWorkMode: true,
+      onToggleConversationCollapse: noop,
+      onToggleWorkMode: noop,
+    });
+
+    expect(
+      view.queryByRole("button", { name: CONVERSATION_DRAWER_CONTROL_LABEL }),
+    ).toBeNull();
+    expect(view.queryByRole("status")).toBeNull();
   });
 });
 
