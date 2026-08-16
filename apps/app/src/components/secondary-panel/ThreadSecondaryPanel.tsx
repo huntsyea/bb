@@ -308,13 +308,13 @@ export interface ThreadSecondaryPanelProps {
   isConversationCollapsed: boolean;
   /**
    * Toggles {@link isConversationCollapsed}. Hosted split panes fall back to
-   * this resource-only full-screen control when the Thread has no eligible
+   * this resource-only collapse control when the Thread has no eligible
    * work surface to make primary. Unused in the drawer.
    */
   onToggleConversationCollapse: () => void;
   /**
    * Thread Work mode. When provided, the panel toolbar shows the enter/restore
-   * Work mode control instead of resource-only full screen. Hosted split panes
+   * Work mode control instead of the resource-only collapse. Hosted split panes
    * pass it too: entering Work mode maximizes the owning pane, so its panel
    * becomes the window's primary surface.
    */
@@ -438,7 +438,7 @@ export function ThreadSecondaryPanel({
   });
   // The Work mode control also belongs in the compact drawer: that drawer is
   // where the work surface lives before it is promoted to the page. The
-  // resource-only full-screen control stays wide-layout-only.
+  // resource-only collapse control stays wide-layout-only.
   const conversationCollapseControl = !showConversationCollapseControl
     ? null
     : onToggleWorkMode

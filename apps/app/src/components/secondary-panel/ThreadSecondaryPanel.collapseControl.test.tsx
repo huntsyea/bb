@@ -220,10 +220,10 @@ describe("ThreadSecondaryPanel Work mode control", () => {
       withoutWorkModeView.queryByRole("button", { name: "Enter Work mode" }),
     ).toBeNull();
     expect(
-      withoutWorkModeView.queryByRole("button", { name: "Full Screen" }),
+      withoutWorkModeView.queryByRole("button", { name: "Hide Conversation" }),
     ).toBeNull();
     expect(
-      withoutWorkModeView.queryByRole("button", { name: "Exit Full Screen" }),
+      withoutWorkModeView.queryByRole("button", { name: "Show Conversation" }),
     ).toBeNull();
   });
 
@@ -353,22 +353,23 @@ describe("ThreadSecondaryPanel conversation drawer control", () => {
   });
 });
 
-// Hosted split panes still use resource-only full screen until BB-6.
-describe("ThreadSecondaryPanel full-screen control", () => {
-  it("keeps Full Screen before Hide right panel in the trailing toolbar", () => {
+// Hosted split panes whose Thread has no eligible work surface keep the
+// resource-only conversation collapse.
+describe("ThreadSecondaryPanel conversation collapse control", () => {
+  it("keeps Hide Conversation before Hide right panel in the trailing toolbar", () => {
     const view = renderPanel({
       isConversationCollapsed: false,
       onToggleConversationCollapse: noop,
     });
 
-    const fullScreenControl = view.getByRole("button", {
-      name: "Full Screen",
+    const collapseControl = view.getByRole("button", {
+      name: "Hide Conversation",
     });
     const hideControl = view.getByRole("button", {
       name: "Hide right panel",
     });
     expect(
-      fullScreenControl.compareDocumentPosition(hideControl) &
+      collapseControl.compareDocumentPosition(hideControl) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
   });
@@ -380,7 +381,7 @@ describe("ThreadSecondaryPanel full-screen control", () => {
       onToggleConversationCollapse,
     });
 
-    const control = view.getByRole("button", { name: "Full Screen" });
+    const control = view.getByRole("button", { name: "Hide Conversation" });
     expect(control.getAttribute("aria-pressed")).toBe("false");
 
     fireEvent.click(control);
@@ -394,7 +395,7 @@ describe("ThreadSecondaryPanel full-screen control", () => {
       onToggleConversationCollapse,
     });
 
-    const control = view.getByRole("button", { name: "Exit Full Screen" });
+    const control = view.getByRole("button", { name: "Show Conversation" });
     expect(control.getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.click(control);

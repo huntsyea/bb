@@ -75,7 +75,7 @@ function hasThreadId(
  * Whether a given thread's conversation/timeline pane is collapsed so the
  * secondary panel fills the whole content area. Keyed per thread (like the
  * terminal panel and recent-items state) so collapsing one thread's
- * conversation — e.g. opening an app full-screen from the sidebar — never
+ * conversation — e.g. opening an app from the sidebar — never
  * leaks into another thread or gets cleared by selecting an unrelated row.
  * Persisted per thread; only takes effect while the secondary panel is open on
  * a wide viewport — see ThreadDetailSecondaryContent for the gating.

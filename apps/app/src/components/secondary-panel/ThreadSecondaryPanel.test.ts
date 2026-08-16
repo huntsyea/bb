@@ -80,7 +80,7 @@ describe("getReservedInlinePanelToggleClassName", () => {
   });
 });
 
-// BB-46: while the panel is full screen inside the split-workspace host and
+// BB-46: while the conversation is collapsed inside the split-workspace host and
 // the main sidebar is collapsed, the panel is the window's flush top-left
 // surface, so its leading toolbar shares the title-bar row with the macOS
 // traffic lights and the pinned sidebar trigger. Without the reserve the
@@ -100,7 +100,7 @@ describe("resolveCollapsedPanelTrafficLightReserveClassName", () => {
   // reserve used to additionally require the split host, which is what left
   // inline detail's tab strip sitting under the traffic lights; with that gate
   // gone the surfaces are indistinguishable here, so one case covers them.
-  it("reserves the safe area for the panel full-screen case", () => {
+  it("reserves the safe area for the collapsed-conversation case", () => {
     expect(resolveCollapsedPanelTrafficLightReserveClassName(base)).toBe(
       MACOS_COLLAPSED_TOP_LEFT_RESERVE_CLASS,
     );

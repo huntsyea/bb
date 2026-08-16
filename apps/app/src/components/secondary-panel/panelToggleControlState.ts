@@ -2,8 +2,8 @@ export type PanelToggleAction =
   | "show-panel"
   | "enter-work-mode"
   | "restore-conversation"
-  | "enter-full-screen"
-  | "exit-full-screen";
+  | "hide-conversation"
+  | "show-conversation";
 
 /**
  * Icon names the toggle can render. A subset of the Icon component's `IconName`
@@ -16,7 +16,7 @@ interface PanelToggleActionPresentation {
   iconName: PanelToggleIconName;
   /**
    * Whether the action is currently presenting Work mode (or the hosted
-   * pane's remaining full-screen collapse). This drives `aria-pressed`.
+   * pane's remaining conversation collapse). This drives `aria-pressed`.
    */
   isPressed: boolean;
 }
@@ -40,13 +40,13 @@ const PANEL_TOGGLE_ACTION_PRESENTATION = {
     iconName: "Minimize2",
     isPressed: true,
   },
-  "enter-full-screen": {
-    label: "Full Screen",
+  "hide-conversation": {
+    label: "Hide Conversation",
     iconName: "Maximize2",
     isPressed: false,
   },
-  "exit-full-screen": {
-    label: "Exit Full Screen",
+  "show-conversation": {
+    label: "Show Conversation",
     iconName: "Minimize2",
     isPressed: true,
   },
@@ -85,14 +85,18 @@ export interface ResolveConversationCollapseControlArgs {
   onToggleConversationCollapse: () => void;
 }
 
-/** Resource-only full-screen control used by hosted split panes. */
+/**
+ * Resource-only conversation collapse, kept for hosted split panes whose
+ * Thread has no eligible work surface. Distinct from the pane's own "Full
+ * Screen" maximization control, which the two can render side by side.
+ */
 export function resolveConversationCollapseControl({
   isConversationCollapsed,
   onToggleConversationCollapse,
 }: ResolveConversationCollapseControlArgs): PanelToggleControlState {
   const action: PanelToggleAction = isConversationCollapsed
-    ? "exit-full-screen"
-    : "enter-full-screen";
+    ? "show-conversation"
+    : "hide-conversation";
   return {
     action,
     ...PANEL_TOGGLE_ACTION_PRESENTATION[action],
