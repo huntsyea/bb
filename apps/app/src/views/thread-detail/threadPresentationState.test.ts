@@ -18,6 +18,9 @@ import {
   parseConversationRailWidthPercent,
   parseThreadPresentationState,
   pruneThreadPresentationStateStorage,
+  shouldPruneThreadPresentationState,
+  getThreadConversationCollapsedStorageKey,
+  THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS,
   readThreadPresentationStateFromStorage,
   resolveStoredThreadPresentationState,
   resolveThreadPresentationRestore,
@@ -27,12 +30,6 @@ import {
   type ThreadPresentationState,
 } from "./threadPresentationState";
 import { DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT } from "./threadWorkMode";
-import {
-  FIXED_PANEL_TABS_IDLE_EXPIRY_MS,
-  createEmptyFixedPanelTabsState,
-  getFixedPanelTabsStateStorageKey,
-  serializeFixedPanelTabsState,
-} from "@/lib/fixed-panel-tabs-state";
 
 function workspaceFile(path: string): FixedPanelTab {
   return createWorkspaceFilePreviewFixedPanelTab({
@@ -86,6 +83,7 @@ describe("threadPresentationState", () => {
       mode: "work",
       activeEligibleTabId: fileA.id,
       recencyTabIds: [fileA.id],
+      lastTouchedAt: 0,
     });
     expect(parseThreadPresentationState("{")).toBeNull();
     expect(parseThreadPresentationState(null)).toBeNull();
@@ -381,6 +379,45 @@ describe("threadPresentationState", () => {
     ).toBe(false);
   });
 
+  it("does not treat a tab-query error as hydration when no local tabs exist", () => {
+    expect(
+      haveThreadTabsHydrated({
+        hasQueryError: true,
+        hasSettledQuery: true,
+        isLocalOnlyRevision: false,
+        localMatchesRemote: false,
+        localTabCount: 0,
+      }),
+    ).toBe(false);
+    expect(
+      resolveThreadPresentationRestore({
+        canEnterWorkMode: false,
+        state: presentation({
+          mode: "work",
+          activeEligibleTabId: "tab-docs",
+          recencyTabIds: ["tab-docs"],
+        }),
+        tabs: [],
+        tabsHydrated: haveThreadTabsHydrated({
+          hasQueryError: true,
+          hasSettledQuery: true,
+          isLocalOnlyRevision: false,
+          localMatchesRemote: false,
+          localTabCount: 0,
+        }),
+      }),
+    ).toEqual({ kind: "wait" });
+    expect(
+      haveThreadTabsHydrated({
+        hasQueryError: true,
+        hasSettledQuery: true,
+        isLocalOnlyRevision: false,
+        localMatchesRemote: false,
+        localTabCount: 2,
+      }),
+    ).toBe(true);
+  });
+
   it("writes a migrated presentation once so later collapsed values cannot re-seed Work mode", () => {
     expect(
       readThreadPresentationStateFromStorage({
@@ -423,43 +460,90 @@ describe("threadPresentationState", () => {
     );
   });
 
-  it("prunes presentation keys whose tab storage is missing or expired", () => {
+  it("prunes only expired presentation records and their collapsed keys", () => {
     const now = 1_700_000_000_000;
-    const liveThreadId = "thr-live";
+    const mountedThreadId = "thr-mounted";
+    const recentThreadId = "thr-recent";
     const expiredThreadId = "thr-expired";
-    const orphanThreadId = "thr-orphan";
+    const unknownAgeThreadId = "thr-unknown";
+
     window.localStorage.setItem(
-      getThreadPresentationStateStorageKey({ threadId: liveThreadId }),
-      serializeThreadPresentationState(presentation({ mode: "work" })),
+      getThreadPresentationStateStorageKey({ threadId: mountedThreadId }),
+      serializeThreadPresentationState(
+        presentation({
+          mode: "work",
+          lastTouchedAt: now - THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS - 1,
+        }),
+      ),
     );
     window.localStorage.setItem(
-      getFixedPanelTabsStateStorageKey({ threadId: liveThreadId }),
-      serializeFixedPanelTabsState({
-        state: createEmptyFixedPanelTabsState({ lastUsedAt: now }),
-      }),
+      getThreadPresentationStateStorageKey({ threadId: recentThreadId }),
+      serializeThreadPresentationState(
+        presentation({ mode: "work", lastTouchedAt: now }),
+      ),
     );
     window.localStorage.setItem(
       getThreadPresentationStateStorageKey({ threadId: expiredThreadId }),
-      serializeThreadPresentationState(presentation({ mode: "work" })),
-    );
-    window.localStorage.setItem(
-      getFixedPanelTabsStateStorageKey({ threadId: expiredThreadId }),
-      serializeFixedPanelTabsState({
-        state: createEmptyFixedPanelTabsState({
-          lastUsedAt: now - FIXED_PANEL_TABS_IDLE_EXPIRY_MS - 1,
+      serializeThreadPresentationState(
+        presentation({
+          mode: "conversation",
+          lastTouchedAt: now - THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS - 1,
         }),
-      }),
+      ),
     );
     window.localStorage.setItem(
-      getThreadPresentationStateStorageKey({ threadId: orphanThreadId }),
-      serializeThreadPresentationState(presentation({ mode: "work" })),
+      getThreadConversationCollapsedStorageKey({ threadId: expiredThreadId }),
+      "true",
+    );
+    window.localStorage.setItem(
+      getThreadPresentationStateStorageKey({ threadId: unknownAgeThreadId }),
+      serializeThreadPresentationState(
+        presentation({ mode: "work", lastTouchedAt: 0 }),
+      ),
     );
 
-    pruneThreadPresentationStateStorage({ now });
+    expect(
+      shouldPruneThreadPresentationState({
+        now,
+        retainThreadId: mountedThreadId,
+        state: presentation({
+          mode: "work",
+          lastTouchedAt: now - THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS - 1,
+        }),
+        threadId: mountedThreadId,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPruneThreadPresentationState({
+        now,
+        state: presentation({ mode: "work", lastTouchedAt: now }),
+        threadId: recentThreadId,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPruneThreadPresentationState({
+        now,
+        state: presentation({
+          mode: "conversation",
+          lastTouchedAt: now - THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS - 1,
+        }),
+        threadId: expiredThreadId,
+      }),
+    ).toBe(true);
+
+    pruneThreadPresentationStateStorage({
+      now,
+      retainThreadId: mountedThreadId,
+    });
 
     expect(
       window.localStorage.getItem(
-        getThreadPresentationStateStorageKey({ threadId: liveThreadId }),
+        getThreadPresentationStateStorageKey({ threadId: mountedThreadId }),
+      ),
+    ).not.toBeNull();
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationStateStorageKey({ threadId: recentThreadId }),
       ),
     ).not.toBeNull();
     expect(
@@ -469,8 +553,13 @@ describe("threadPresentationState", () => {
     ).toBeNull();
     expect(
       window.localStorage.getItem(
-        getThreadPresentationStateStorageKey({ threadId: orphanThreadId }),
+        getThreadConversationCollapsedStorageKey({ threadId: expiredThreadId }),
       ),
     ).toBeNull();
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationStateStorageKey({ threadId: unknownAgeThreadId }),
+      ),
+    ).not.toBeNull();
   });
 });

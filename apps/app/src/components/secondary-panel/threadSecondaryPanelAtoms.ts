@@ -9,14 +9,18 @@ import { DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT } from "@/views/thread-detail/t
 import {
   CONVERSATION_RAIL_WIDTH_STORAGE_KEY,
   DEFAULT_THREAD_PRESENTATION_STATE,
+  getThreadConversationCollapsedStorageKey,
   getThreadPresentationStateStorageKey,
   parseConversationRailWidthPercent,
   parseThreadPresentationState,
   serializeThreadPresentationState,
   threadIdFromPresentationStorageKey,
+  touchThreadPresentationState,
   readThreadPresentationStateFromStorage,
   type ThreadPresentationState,
 } from "@/views/thread-detail/threadPresentationState";
+
+export { getThreadConversationCollapsedStorageKey };
 
 export const threadSecondaryPanelResizingAtom = atom(false);
 
@@ -25,18 +29,6 @@ type ThreadSecondaryPanelThreadId =
   | ResolvedThreadSecondaryPanelThreadId
   | null
   | undefined;
-
-interface ThreadSecondaryPanelStorageKeyArgs {
-  prefix: string;
-  threadId: ResolvedThreadSecondaryPanelThreadId;
-}
-
-function getThreadSecondaryPanelStorageKey({
-  prefix,
-  threadId,
-}: ThreadSecondaryPanelStorageKeyArgs): string {
-  return `${prefix}-${encodeURIComponent(threadId)}`;
-}
 
 /**
  * User's preferred secondary panel width as a percentage of the surrounding
@@ -77,9 +69,6 @@ function hasThreadId(
   return threadId !== null && threadId !== undefined && threadId.length > 0;
 }
 
-const THREAD_CONVERSATION_COLLAPSED_STORAGE_PREFIX =
-  "bb.thread.conversation.collapsed";
-
 /**
  * Whether a given thread's conversation/timeline pane is collapsed so the
  * secondary panel fills the whole content area. Keyed per thread (like the
@@ -89,19 +78,6 @@ const THREAD_CONVERSATION_COLLAPSED_STORAGE_PREFIX =
  * Persisted per thread; only takes effect while the secondary panel is open on
  * a wide viewport — see ThreadDetailSecondaryContent for the gating.
  */
-interface ThreadConversationCollapsedStorageKeyArgs {
-  threadId: ResolvedThreadSecondaryPanelThreadId;
-}
-
-export function getThreadConversationCollapsedStorageKey({
-  threadId,
-}: ThreadConversationCollapsedStorageKeyArgs): string {
-  return getThreadSecondaryPanelStorageKey({
-    prefix: THREAD_CONVERSATION_COLLAPSED_STORAGE_PREFIX,
-    threadId,
-  });
-}
-
 const conversationCollapsedStorage = threadSecondaryPanelBooleanStorage;
 
 const threadConversationCollapsedAtomFamily = atomFamily(
@@ -156,8 +132,15 @@ const threadPresentationStateStorage: SyncStorage<ThreadPresentationState> = {
     if (resolved.persistMigratedValue) {
       window.localStorage.setItem(
         key,
-        serializeThreadPresentationState(resolved.state),
+        serializeThreadPresentationState(
+          touchThreadPresentationState(resolved.state, Date.now()),
+        ),
       );
+      if (threadId !== null) {
+        window.localStorage.removeItem(
+          getThreadConversationCollapsedStorageKey({ threadId }),
+        );
+      }
     }
     return resolved.state;
   },
@@ -165,7 +148,12 @@ const threadPresentationStateStorage: SyncStorage<ThreadPresentationState> = {
     if (typeof window === "undefined") {
       return;
     }
-    window.localStorage.setItem(key, serializeThreadPresentationState(value));
+    window.localStorage.setItem(
+      key,
+      serializeThreadPresentationState(
+        touchThreadPresentationState(value, Date.now()),
+      ),
+    );
   },
   removeItem: (key) => {
     if (typeof window === "undefined") {
@@ -181,10 +169,14 @@ const threadPresentationStateStorage: SyncStorage<ThreadPresentationState> = {
       if (event.storageArea !== window.localStorage || event.key !== key) {
         return;
       }
-      callback(
-        parseThreadPresentationState(event.newValue) ??
-          DEFAULT_THREAD_PRESENTATION_STATE,
-      );
+      if (event.newValue === null) {
+        return;
+      }
+      const parsed = parseThreadPresentationState(event.newValue);
+      if (parsed === null) {
+        return;
+      }
+      callback(parsed);
     };
     window.addEventListener("storage", handleStorage);
     return () => {

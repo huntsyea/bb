@@ -199,7 +199,10 @@ export function useFixedPanelTabsStorageMaintenance(
   useEffect(() => {
     const now = Date.now();
     pruneFixedPanelTabsStorage({ now });
-    pruneThreadPresentationStateStorage({ now });
+    pruneThreadPresentationStateStorage({
+      now,
+      retainThreadId: panelStateId,
+    });
   }, [panelStateId]);
 }
 

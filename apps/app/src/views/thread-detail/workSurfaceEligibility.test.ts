@@ -19,6 +19,7 @@ import {
   hasEligibleWorkSurface,
   isEligibleWorkSurface,
   reconcileThreadWorkModeSurfaces,
+  resolveLiveThreadWorkModeSurfaces,
   recordEligibleWorkSurfaceRecency,
   resolveEnterThreadWorkMode,
   resolveWorkSurfaceSnapshotForThread,
@@ -367,5 +368,34 @@ describe("workSurfaceEligibility", () => {
         tabs: [info],
       }),
     ).toEqual({ activeTabId: info.id, kind: "keep" });
+  });
+
+  it("does not activate a fallback surface when Work mode cannot be entered", () => {
+    const fileA = workspaceFile("a.ts");
+    const fileB = workspaceFile("b.ts");
+    const newTab = createNewTabFixedPanelTab();
+
+    expect(
+      resolveLiveThreadWorkModeSurfaces({
+        activeTabId: newTab.id,
+        canEnterWorkMode: false,
+        isWorkMode: true,
+        previousActiveTabId: "closed-file",
+        previousWasEligible: true,
+        recencyTabIds: [fileB.id, fileA.id],
+        tabs: [fileA, fileB, newTab],
+      }),
+    ).toEqual({ kind: "skip" });
+    expect(
+      resolveLiveThreadWorkModeSurfaces({
+        activeTabId: newTab.id,
+        canEnterWorkMode: true,
+        isWorkMode: true,
+        previousActiveTabId: "closed-file",
+        previousWasEligible: true,
+        recencyTabIds: [fileB.id, fileA.id],
+        tabs: [fileA, fileB, newTab],
+      }),
+    ).toEqual({ activeTabId: fileB.id, kind: "activate" });
   });
 });

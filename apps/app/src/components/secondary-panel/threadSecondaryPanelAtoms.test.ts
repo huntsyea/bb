@@ -54,8 +54,7 @@ describe("thread presentation persistence", () => {
           getThreadPresentationStateStorageKey({ threadId: "thr-a" }),
         ),
       ),
-    ).toEqual({
-      ...DEFAULT_THREAD_PRESENTATION_STATE,
+    ).toMatchObject({
       mode: "work",
       activeEligibleTabId: "tab-docs",
       recencyTabIds: ["tab-docs", "tab-file"],
@@ -66,10 +65,10 @@ describe("thread presentation persistence", () => {
           getThreadPresentationStateStorageKey({ threadId: "thr-b" }),
         ),
       ),
-    ).toEqual({
-      ...DEFAULT_THREAD_PRESENTATION_STATE,
+    ).toMatchObject({
       recencyTabIds: ["tab-other"],
       activeEligibleTabId: "tab-other",
+      mode: "conversation",
     });
 
     expect(hydrateAtom(getThreadWorkModeAtom("thr-a"))).toBe(true);
@@ -77,8 +76,7 @@ describe("thread presentation persistence", () => {
       "tab-docs",
       "tab-file",
     ]);
-    expect(hydrateAtom(getThreadPresentationStateAtom("thr-a"))).toEqual({
-      ...DEFAULT_THREAD_PRESENTATION_STATE,
+    expect(hydrateAtom(getThreadPresentationStateAtom("thr-a"))).toMatchObject({
       mode: "work",
       activeEligibleTabId: "tab-docs",
       recencyTabIds: ["tab-docs", "tab-file"],
@@ -111,10 +109,14 @@ describe("thread presentation persistence", () => {
           getThreadPresentationStateStorageKey({ threadId: "thr-legacy" }),
         ),
       ),
-    ).toEqual({
-      ...DEFAULT_THREAD_PRESENTATION_STATE,
+    ).toMatchObject({
       mode: "work",
     });
+    expect(
+      window.localStorage.getItem(
+        getThreadConversationCollapsedStorageKey({ threadId: "thr-legacy" }),
+      ),
+    ).toBeNull();
     expect(
       hydrate((store) => store.get(getThreadWorkModeAtom("thr-other"))),
     ).toBe(false);
@@ -124,7 +126,14 @@ describe("thread presentation persistence", () => {
           getThreadPresentationStateStorageKey({ threadId: "thr-other" }),
         ),
       ),
-    ).toEqual(DEFAULT_THREAD_PRESENTATION_STATE);
+    ).toMatchObject({
+      mode: "conversation",
+    });
+    expect(
+      window.localStorage.getItem(
+        getThreadConversationCollapsedStorageKey({ threadId: "thr-other" }),
+      ),
+    ).toBeNull();
     expect(
       hydrate((store) =>
         store.get(getThreadPresentationStateAtom("thr-missing")),

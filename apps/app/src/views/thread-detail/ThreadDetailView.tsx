@@ -160,7 +160,7 @@ import {
   createWorkSurfaceSnapshot,
   hasEligibleWorkSurface,
   isEligibleWorkSurface,
-  reconcileThreadWorkModeSurfaces,
+  resolveLiveThreadWorkModeSurfaces,
   recordEligibleWorkSurfaceRecency,
   resolveEnterThreadWorkMode,
   resolveWorkSurfaceSnapshotForThread,
@@ -1431,6 +1431,9 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     return resolved.didReset;
   }, [activeFixedSecondaryTab, threadId]);
   useEffect(() => {
+    if (!tabsHydrated) {
+      return;
+    }
     if (resetWorkSurfaceSnapshotIfThreadChanged()) {
       return;
     }
@@ -1457,6 +1460,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     fixedPanelTabsState.secondary.tabs,
     resetWorkSurfaceSnapshotIfThreadChanged,
     setWorkSurfaceRecencyTabIds,
+    tabsHydrated,
   ]);
   useEffect(() => {
     const restoreDecision = resolveThreadPresentationRestore({
@@ -1500,14 +1504,22 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     if (didChangeThread) {
       return;
     }
-    const result = reconcileThreadWorkModeSurfaces({
+    const result = resolveLiveThreadWorkModeSurfaces({
       activeTabId: activeFixedSecondaryTabId,
+      canEnterWorkMode,
       isWorkMode,
       previousActiveTabId: previousWorkSurfaceRef.current.activeTabId,
       previousWasEligible: previousWorkSurfaceRef.current.wasEligible,
       recencyTabIds: workSurfaceRecencyTabIds,
       tabs: fixedPanelTabsState.secondary.tabs,
     });
+    if (result.kind === "skip") {
+      previousWorkSurfaceRef.current = createWorkSurfaceSnapshot({
+        activeTab: activeFixedSecondaryTab,
+        threadId,
+      });
+      return;
+    }
     if (result.kind === "exit") {
       setIsWorkMode(() => false);
       appToast.message(WORK_MODE_NO_SURFACE_NOTICE, {

@@ -1,9 +1,6 @@
 import { z } from "zod";
 import {
-  EMPTY_FIXED_PANEL_TABS_STATE,
-  getFixedPanelTabsStateStorageKey,
-  isFixedPanelTabsStateExpired,
-  parseFixedPanelTabsState,
+  FIXED_PANEL_TABS_IDLE_EXPIRY_MS,
   type FixedPanelTab,
 } from "@/lib/fixed-panel-tabs-state";
 import {
@@ -19,14 +16,19 @@ import {
 export const THREAD_PRESENTATION_STATE_VERSION = 1;
 export const THREAD_PRESENTATION_STATE_STORAGE_PREFIX =
   "bb.thread.presentation";
+export const THREAD_CONVERSATION_COLLAPSED_STORAGE_PREFIX =
+  "bb.thread.conversation.collapsed";
 export const CONVERSATION_RAIL_WIDTH_STORAGE_KEY =
   "bb.thread.conversationRail.widthPercent";
+export const THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS =
+  FIXED_PANEL_TABS_IDLE_EXPIRY_MS;
 
 export interface ThreadPresentationState {
   version: typeof THREAD_PRESENTATION_STATE_VERSION;
   mode: ThreadPresentationMode;
   activeEligibleTabId: string | null;
   recencyTabIds: string[];
+  lastTouchedAt: number;
 }
 
 export const DEFAULT_THREAD_PRESENTATION_STATE: ThreadPresentationState = {
@@ -34,6 +36,7 @@ export const DEFAULT_THREAD_PRESENTATION_STATE: ThreadPresentationState = {
   mode: "conversation",
   activeEligibleTabId: null,
   recencyTabIds: [],
+  lastTouchedAt: 0,
 };
 
 const threadPresentationStateSchema = z
@@ -42,6 +45,7 @@ const threadPresentationStateSchema = z
     mode: z.enum(["conversation", "work"]),
     activeEligibleTabId: z.string().min(1).nullable(),
     recencyTabIds: z.array(z.string().min(1)),
+    lastTouchedAt: z.number().int().nonnegative().optional(),
   })
   .strict();
 
@@ -53,6 +57,12 @@ export function getThreadPresentationStateStorageKey({
   threadId,
 }: ThreadPresentationStorageKeyArgs): string {
   return `${THREAD_PRESENTATION_STATE_STORAGE_PREFIX}-${encodeURIComponent(threadId)}`;
+}
+
+export function getThreadConversationCollapsedStorageKey({
+  threadId,
+}: ThreadPresentationStorageKeyArgs): string {
+  return `${THREAD_CONVERSATION_COLLAPSED_STORAGE_PREFIX}-${encodeURIComponent(threadId)}`;
 }
 
 export function threadIdFromPresentationStorageKey(key: string): string | null {
@@ -78,7 +88,13 @@ export function parseThreadPresentationState(
     const result = threadPresentationStateSchema.safeParse(
       JSON.parse(storedValue),
     );
-    return result.success ? result.data : null;
+    if (!result.success) {
+      return null;
+    }
+    return {
+      ...result.data,
+      lastTouchedAt: result.data.lastTouchedAt ?? 0,
+    };
   } catch {
     return null;
   }
@@ -138,6 +154,16 @@ export function areThreadPresentationStatesEqual(
       (tabId, index) => tabId === right.recencyTabIds[index],
     )
   );
+}
+
+export function touchThreadPresentationState(
+  state: ThreadPresentationState,
+  now: number,
+): ThreadPresentationState {
+  return {
+    ...state,
+    lastTouchedAt: now,
+  };
 }
 
 function uniqueRecencyTabIds(recencyTabIds: readonly string[]): string[] {
@@ -239,6 +265,7 @@ export function restoreThreadPresentationState(args: {
         recencyTabIds,
         selected.id,
       ),
+      lastTouchedAt: args.state.lastTouchedAt,
     },
   };
 }
@@ -262,7 +289,7 @@ export function haveThreadTabsHydrated(args: {
     return false;
   }
   if (args.hasQueryError) {
-    return true;
+    return args.localTabCount > 0;
   }
   if (args.isLocalOnlyRevision && args.localTabCount > 0) {
     return true;
@@ -305,8 +332,27 @@ function getLocalStorage(): Storage | null {
   return window.localStorage;
 }
 
+export function shouldPruneThreadPresentationState(args: {
+  now: number;
+  retainThreadId?: string | null;
+  state: ThreadPresentationState;
+  threadId: string;
+}): boolean {
+  if (args.retainThreadId === args.threadId) {
+    return false;
+  }
+  if (args.state.lastTouchedAt <= 0) {
+    return false;
+  }
+  return (
+    args.now - args.state.lastTouchedAt >
+    THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS
+  );
+}
+
 export function pruneThreadPresentationStateStorage(args: {
   now: number;
+  retainThreadId?: string | null;
 }): void {
   const localStorage = getLocalStorage();
   if (localStorage === null) {
@@ -327,21 +373,28 @@ export function pruneThreadPresentationStateStorage(args: {
       localStorage.removeItem(key);
       continue;
     }
-    const tabStoredValue = localStorage.getItem(
-      getFixedPanelTabsStateStorageKey({ threadId }),
-    );
-    if (tabStoredValue === null) {
+    const state = parseThreadPresentationState(localStorage.getItem(key));
+    if (state === null) {
       localStorage.removeItem(key);
+      localStorage.removeItem(
+        getThreadConversationCollapsedStorageKey({ threadId }),
+      );
       continue;
     }
-    const tabState = parseFixedPanelTabsState({
-      initialValue: EMPTY_FIXED_PANEL_TABS_STATE,
-      now: args.now,
-      storedValue: tabStoredValue,
-    });
-    if (isFixedPanelTabsStateExpired({ now: args.now, state: tabState })) {
-      localStorage.removeItem(key);
+    if (
+      !shouldPruneThreadPresentationState({
+        now: args.now,
+        retainThreadId: args.retainThreadId,
+        state,
+        threadId,
+      })
+    ) {
+      continue;
     }
+    localStorage.removeItem(key);
+    localStorage.removeItem(
+      getThreadConversationCollapsedStorageKey({ threadId }),
+    );
   }
 }
 

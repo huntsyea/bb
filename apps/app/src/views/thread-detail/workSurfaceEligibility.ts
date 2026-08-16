@@ -129,6 +129,25 @@ export function resolveWorkSurfaceSnapshotForThread(args: {
   };
 }
 
+export type LiveWorkModeSurfaceReconciliation =
+  | WorkModeSurfaceReconciliation
+  | { kind: "skip" };
+
+export function resolveLiveThreadWorkModeSurfaces(args: {
+  activeTabId: string | null;
+  canEnterWorkMode: boolean;
+  isWorkMode: boolean;
+  previousActiveTabId: string | null;
+  previousWasEligible: boolean;
+  recencyTabIds: readonly string[];
+  tabs: readonly FixedPanelTab[];
+}): LiveWorkModeSurfaceReconciliation {
+  if (!args.canEnterWorkMode) {
+    return { kind: "skip" };
+  }
+  return reconcileThreadWorkModeSurfaces(args);
+}
+
 export function reconcileThreadWorkModeSurfaces(args: {
   activeTabId: string | null;
   isWorkMode: boolean;
