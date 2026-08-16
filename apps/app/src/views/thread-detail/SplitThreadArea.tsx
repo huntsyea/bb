@@ -533,10 +533,17 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
       // would render the Thread as conversation while its control reads "on",
       // and the next click on that control would turn Work mode off again
       // instead of entering it.
+      //
+      // This deliberately does not consult the recorded owner. Work mode claims
+      // nothing when the user maximized the pane first, so ownership is null in
+      // exactly the case where the pane is maximized and Work mode is on — the
+      // state that keeps a pre-existing maximization alive across a Work mode
+      // exit. What matters here is that the Thread is in Work mode and is about
+      // to lose the workspace, not which of the two put it there.
       if (
         store.get(maximizedPaneIdAtom) === paneId &&
-        store.get(workModeMaximizedPaneIdAtom) === paneId &&
-        pane.content.kind === "thread"
+        pane.content.kind === "thread" &&
+        store.get(getThreadWorkModeAtom(pane.content.threadId))
       ) {
         store.set(getThreadWorkModeAtom(pane.content.threadId), false);
       }

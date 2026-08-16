@@ -821,6 +821,30 @@ describe("SplitThreadArea", () => {
     expect(store.get(maximizedPaneIdAtom)).toBe("pane-1");
   });
 
+  it("turns Work mode off when the user restores a maximization Work mode never owned", async () => {
+    const store = renderSplitArea({
+      path: threadPath("thr-a"),
+      layout: twoPaneLayout("pane-1"),
+    });
+
+    // Maximizing first means Work mode claims nothing, so ownership stays
+    // null — but Work mode still depends on the workspace being maximized.
+    fireEvent.click(await screen.findByTestId("maximize-thr-a"));
+    fireEvent.click(screen.getByTestId("work-mode-thr-a"));
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBeNull();
+    expect(store.get(getThreadWorkModeAtom("thr-a"))).toBe(true);
+
+    fireEvent.click(screen.getByTestId("maximize-thr-a"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("work-mode-thr-a").textContent).toBe(
+        "enter work mode",
+      );
+    });
+    expect(store.get(getThreadWorkModeAtom("thr-a"))).toBe(false);
+    expect(store.get(maximizedPaneIdAtom)).toBeNull();
+  });
+
   it("restores the hidden split before navigating the pane to another thread", async () => {
     const initialLayout = twoPaneLayout("pane-1");
     const store = renderSplitArea({
