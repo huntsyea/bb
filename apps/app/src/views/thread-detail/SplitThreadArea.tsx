@@ -545,7 +545,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
         pane.content.kind === "thread" &&
         store.get(getThreadWorkModeAtom(pane.content.threadId))
       ) {
-        store.set(getThreadWorkModeAtom(pane.content.threadId), false);
+        store.set(getThreadWorkModeAtom(pane.content.threadId), () => false);
       }
       setMaximizedPaneId((previous) => (previous === paneId ? null : paneId));
     },

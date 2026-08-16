@@ -926,7 +926,7 @@ describe("SplitThreadArea", () => {
     store.set(splitLayoutAtom, initialLayout);
     // thr-c restores its own persisted Work mode as it mounts, which must not
     // let it adopt the maximization thr-a owned a commit earlier.
-    store.set(getThreadWorkModeAtom("thr-c"), true);
+    store.set(getThreadWorkModeAtom("thr-c"), () => true);
     render(
       <TooltipProvider>
         <JotaiProvider store={store}>

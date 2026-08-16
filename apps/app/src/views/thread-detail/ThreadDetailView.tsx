@@ -1625,7 +1625,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
           return;
         }
         if (!shouldBeWorkMode) {
-          setIsWorkMode(false);
+          setIsWorkMode(() => false);
           return;
         }
         const entry = resolveEnterThreadWorkMode({
@@ -1642,7 +1642,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
         ) {
           activateTab(entry.activeTabId);
         }
-        setIsWorkMode(true);
+        setIsWorkMode(() => true);
       }),
     [
       activateTab,
