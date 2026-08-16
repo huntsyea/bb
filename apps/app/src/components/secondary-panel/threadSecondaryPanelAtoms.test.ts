@@ -149,19 +149,19 @@ describe("thread presentation persistence", () => {
           threadId: "thr-other",
         }),
       ),
-    ).toBeNull();
+    ).toBe("true");
+    expect(
+      hydrate((store) =>
+        store.get(getThreadPresentationStateAtom("thr-missing")),
+      ),
+    ).toEqual(DEFAULT_THREAD_PRESENTATION_STATE);
     expect(
       window.localStorage.getItem(
         getThreadPresentationCollapsedMigrationMarkerKey({
           threadId: "thr-missing",
         }),
       ),
-    ).toBeNull();
-    expect(
-      hydrate((store) =>
-        store.get(getThreadPresentationStateAtom("thr-missing")),
-      ),
-    ).toEqual(DEFAULT_THREAD_PRESENTATION_STATE);
+    ).toBe("true");
 
     window.localStorage.setItem(
       getThreadConversationCollapsedStorageKey({ threadId: "thr-other" }),
@@ -202,7 +202,7 @@ describe("thread presentation persistence", () => {
     ).toBe("true");
   });
 
-  it("does not write a migration marker for a fresh Thread with no collapsed key", () => {
+  it("writes a migration marker on first presentation persist for a fresh Thread", () => {
     hydrate((store) => store.get(getThreadPresentationStateAtom("thr-fresh")));
     expect(
       window.localStorage.getItem(
@@ -210,7 +210,7 @@ describe("thread presentation persistence", () => {
           threadId: "thr-fresh",
         }),
       ),
-    ).toBeNull();
+    ).toBe("true");
   });
 
   it("does not let a stored presentation leak into another Thread on switch", () => {

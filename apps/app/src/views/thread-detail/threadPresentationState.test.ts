@@ -21,7 +21,6 @@ import {
   shouldPruneThreadPresentationState,
   shouldRemovePresentationMigrationMarker,
   shouldPersistPresentationTouch,
-  shouldWriteCollapsedMigrationMarker,
   getThreadConversationCollapsedStorageKey,
   getThreadPresentationCollapsedMigrationMarkerKey,
   THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS,
@@ -432,7 +431,6 @@ describe("threadPresentationState", () => {
         legacyCollapsedStoredValue: "true",
       }),
     ).toEqual({
-      persistMarker: true,
       persistMigratedValue: true,
       persistTouch: true,
       state: presentation({ mode: "work" }),
@@ -446,7 +444,6 @@ describe("threadPresentationState", () => {
         legacyCollapsedStoredValue: "true",
       }),
     ).toEqual({
-      persistMarker: false,
       persistMigratedValue: false,
       persistTouch: true,
       state: presentation({ mode: "conversation" }),
@@ -458,7 +455,6 @@ describe("threadPresentationState", () => {
         legacyCollapsedStoredValue: "true",
       }),
     ).toEqual({
-      persistMarker: false,
       persistMigratedValue: false,
       persistTouch: true,
       state: DEFAULT_THREAD_PRESENTATION_STATE,
@@ -470,14 +466,10 @@ describe("threadPresentationState", () => {
         legacyCollapsedStoredValue: null,
       }),
     ).toEqual({
-      persistMarker: false,
       persistMigratedValue: true,
       persistTouch: true,
       state: DEFAULT_THREAD_PRESENTATION_STATE,
     });
-    expect(shouldWriteCollapsedMigrationMarker(null)).toBe(false);
-    expect(shouldWriteCollapsedMigrationMarker("false")).toBe(false);
-    expect(shouldWriteCollapsedMigrationMarker("true")).toBe(true);
   });
 
   it("keeps a hosted-pane collapse preference through presentation migration", () => {
@@ -701,14 +693,59 @@ describe("threadPresentationState", () => {
     ).not.toBeNull();
   });
 
-  it("does not write a migration marker for a fresh thread with no collapsed key", () => {
+  it("stays in Conversation after a later collapse, presentation expiry, and re-read", () => {
+    const now = 1_700_000_000_000;
+    const threadId = "thr-reseed";
+    const firstRead = readThreadPresentationStateFromStorage({
+      hasCollapsedMigrationMarker: false,
+      storedValue: null,
+      legacyCollapsedStoredValue: null,
+    });
+    expect(firstRead.persistMigratedValue).toBe(true);
+    expect(firstRead.state.mode).toBe("conversation");
+
+    window.localStorage.setItem(
+      getThreadPresentationStateStorageKey({ threadId }),
+      serializeThreadPresentationState(
+        presentation({
+          mode: firstRead.state.mode,
+          lastTouchedAt: now - THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS - 1,
+        }),
+      ),
+    );
+    window.localStorage.setItem(
+      getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+      "true",
+    );
+    window.localStorage.setItem(
+      getThreadConversationCollapsedStorageKey({ threadId }),
+      "true",
+    );
+
+    pruneThreadPresentationStateStorage({ now });
+
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationStateStorageKey({ threadId }),
+      ),
+    ).toBeNull();
+    expect(
+      window.localStorage.getItem(
+        getThreadConversationCollapsedStorageKey({ threadId }),
+      ),
+    ).toBe("true");
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+      ),
+    ).toBe("true");
     expect(
       readThreadPresentationStateFromStorage({
-        hasCollapsedMigrationMarker: false,
+        hasCollapsedMigrationMarker: true,
         storedValue: null,
-        legacyCollapsedStoredValue: null,
-      }).persistMarker,
-    ).toBe(false);
+        legacyCollapsedStoredValue: "true",
+      }).state.mode,
+    ).toBe("conversation");
   });
 
   it("removes a marker when its presentation key is pruned and no collapsed key remains", () => {

@@ -94,12 +94,6 @@ export function threadIdFromPresentationMigrationMarkerKey(
   }
 }
 
-export function shouldWriteCollapsedMigrationMarker(
-  legacyCollapsedStoredValue: string | null,
-): boolean {
-  return legacyCollapsedStoredValue === "true";
-}
-
 export function threadIdFromPresentationStorageKey(key: string): string | null {
   const prefix = `${THREAD_PRESENTATION_STATE_STORAGE_PREFIX}-`;
   if (!key.startsWith(prefix)) {
@@ -170,7 +164,6 @@ export function readThreadPresentationStateFromStorage(args: {
   legacyCollapsedStoredValue: string | null;
   storedValue: string | null;
 }): {
-  persistMarker: boolean;
   persistMigratedValue: boolean;
   persistTouch: boolean;
   state: ThreadPresentationState;
@@ -178,7 +171,6 @@ export function readThreadPresentationStateFromStorage(args: {
   const parsed = parseThreadPresentationState(args.storedValue);
   if (parsed !== null) {
     return {
-      persistMarker: false,
       persistMigratedValue: false,
       persistTouch: shouldPersistPresentationTouch(parsed.lastTouchedAt),
       state: parsed,
@@ -186,16 +178,12 @@ export function readThreadPresentationStateFromStorage(args: {
   }
   if (args.hasCollapsedMigrationMarker) {
     return {
-      persistMarker: false,
       persistMigratedValue: false,
       persistTouch: true,
       state: DEFAULT_THREAD_PRESENTATION_STATE,
     };
   }
   return {
-    persistMarker: shouldWriteCollapsedMigrationMarker(
-      args.legacyCollapsedStoredValue,
-    ),
     persistMigratedValue: true,
     persistTouch: true,
     state: migrateLegacyCollapsedPresentationState(
