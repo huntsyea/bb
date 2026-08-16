@@ -146,7 +146,7 @@ const threadPresentationStateStorage: SyncStorage<ThreadPresentationState> = {
         ),
       );
     }
-    if (resolved.persistMigratedValue && threadId !== null) {
+    if (resolved.persistMarker && threadId !== null) {
       window.localStorage.setItem(
         getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
         "true",

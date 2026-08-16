@@ -79,6 +79,27 @@ export function hasThreadPresentationCollapsedMigrationMarker(
   return storedValue === "true";
 }
 
+export function threadIdFromPresentationMigrationMarkerKey(
+  key: string,
+): string | null {
+  const prefix = `${THREAD_PRESENTATION_COLLAPSED_MIGRATION_MARKER_PREFIX}-`;
+  if (!key.startsWith(prefix)) {
+    return null;
+  }
+  try {
+    const threadId = decodeURIComponent(key.slice(prefix.length));
+    return threadId.length > 0 ? threadId : null;
+  } catch {
+    return null;
+  }
+}
+
+export function shouldWriteCollapsedMigrationMarker(
+  legacyCollapsedStoredValue: string | null,
+): boolean {
+  return legacyCollapsedStoredValue === "true";
+}
+
 export function threadIdFromPresentationStorageKey(key: string): string | null {
   const prefix = `${THREAD_PRESENTATION_STATE_STORAGE_PREFIX}-`;
   if (!key.startsWith(prefix)) {
@@ -149,6 +170,7 @@ export function readThreadPresentationStateFromStorage(args: {
   legacyCollapsedStoredValue: string | null;
   storedValue: string | null;
 }): {
+  persistMarker: boolean;
   persistMigratedValue: boolean;
   persistTouch: boolean;
   state: ThreadPresentationState;
@@ -156,6 +178,7 @@ export function readThreadPresentationStateFromStorage(args: {
   const parsed = parseThreadPresentationState(args.storedValue);
   if (parsed !== null) {
     return {
+      persistMarker: false,
       persistMigratedValue: false,
       persistTouch: shouldPersistPresentationTouch(parsed.lastTouchedAt),
       state: parsed,
@@ -163,12 +186,16 @@ export function readThreadPresentationStateFromStorage(args: {
   }
   if (args.hasCollapsedMigrationMarker) {
     return {
+      persistMarker: false,
       persistMigratedValue: false,
       persistTouch: true,
       state: DEFAULT_THREAD_PRESENTATION_STATE,
     };
   }
   return {
+    persistMarker: shouldWriteCollapsedMigrationMarker(
+      args.legacyCollapsedStoredValue,
+    ),
     persistMigratedValue: true,
     persistTouch: true,
     state: migrateLegacyCollapsedPresentationState(
@@ -386,6 +413,18 @@ export function shouldPruneThreadPresentationState(args: {
   );
 }
 
+export function shouldRemovePresentationMigrationMarker(args: {
+  hasCollapsedKey: boolean;
+  hasPresentationKey: boolean;
+  retainThreadId?: string | null;
+  threadId: string;
+}): boolean {
+  if (args.retainThreadId === args.threadId) {
+    return false;
+  }
+  return !args.hasPresentationKey && !args.hasCollapsedKey;
+}
+
 export function pruneThreadPresentationStateStorage(args: {
   now: number;
   retainThreadId?: string | null;
@@ -395,15 +434,23 @@ export function pruneThreadPresentationStateStorage(args: {
     return;
   }
 
-  const keys: string[] = [];
+  const presentationKeys: string[] = [];
+  const markerKeys: string[] = [];
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
-    if (key !== null && threadIdFromPresentationStorageKey(key) !== null) {
-      keys.push(key);
+    if (key === null) {
+      continue;
+    }
+    if (threadIdFromPresentationStorageKey(key) !== null) {
+      presentationKeys.push(key);
+      continue;
+    }
+    if (threadIdFromPresentationMigrationMarkerKey(key) !== null) {
+      markerKeys.push(key);
     }
   }
 
-  for (const key of keys) {
+  for (const key of presentationKeys) {
     const threadId = threadIdFromPresentationStorageKey(key);
     if (threadId === null) {
       localStorage.removeItem(key);
@@ -412,6 +459,15 @@ export function pruneThreadPresentationStateStorage(args: {
     const state = parseThreadPresentationState(localStorage.getItem(key));
     if (state === null) {
       localStorage.removeItem(key);
+      if (
+        localStorage.getItem(
+          getThreadConversationCollapsedStorageKey({ threadId }),
+        ) === null
+      ) {
+        localStorage.removeItem(
+          getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+        );
+      }
       continue;
     }
     if (
@@ -425,6 +481,39 @@ export function pruneThreadPresentationStateStorage(args: {
       continue;
     }
     localStorage.removeItem(key);
+    if (
+      localStorage.getItem(
+        getThreadConversationCollapsedStorageKey({ threadId }),
+      ) === null
+    ) {
+      localStorage.removeItem(
+        getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+      );
+    }
+  }
+
+  for (const key of markerKeys) {
+    const threadId = threadIdFromPresentationMigrationMarkerKey(key);
+    if (threadId === null) {
+      localStorage.removeItem(key);
+      continue;
+    }
+    if (
+      shouldRemovePresentationMigrationMarker({
+        hasCollapsedKey:
+          localStorage.getItem(
+            getThreadConversationCollapsedStorageKey({ threadId }),
+          ) !== null,
+        hasPresentationKey:
+          localStorage.getItem(
+            getThreadPresentationStateStorageKey({ threadId }),
+          ) !== null,
+        retainThreadId: args.retainThreadId,
+        threadId,
+      })
+    ) {
+      localStorage.removeItem(key);
+    }
   }
 }
 

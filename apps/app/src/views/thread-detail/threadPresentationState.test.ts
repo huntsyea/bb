@@ -19,7 +19,9 @@ import {
   parseThreadPresentationState,
   pruneThreadPresentationStateStorage,
   shouldPruneThreadPresentationState,
+  shouldRemovePresentationMigrationMarker,
   shouldPersistPresentationTouch,
+  shouldWriteCollapsedMigrationMarker,
   getThreadConversationCollapsedStorageKey,
   getThreadPresentationCollapsedMigrationMarkerKey,
   THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS,
@@ -430,6 +432,7 @@ describe("threadPresentationState", () => {
         legacyCollapsedStoredValue: "true",
       }),
     ).toEqual({
+      persistMarker: true,
       persistMigratedValue: true,
       persistTouch: true,
       state: presentation({ mode: "work" }),
@@ -443,6 +446,7 @@ describe("threadPresentationState", () => {
         legacyCollapsedStoredValue: "true",
       }),
     ).toEqual({
+      persistMarker: false,
       persistMigratedValue: false,
       persistTouch: true,
       state: presentation({ mode: "conversation" }),
@@ -454,10 +458,26 @@ describe("threadPresentationState", () => {
         legacyCollapsedStoredValue: "true",
       }),
     ).toEqual({
+      persistMarker: false,
       persistMigratedValue: false,
       persistTouch: true,
       state: DEFAULT_THREAD_PRESENTATION_STATE,
     });
+    expect(
+      readThreadPresentationStateFromStorage({
+        hasCollapsedMigrationMarker: false,
+        storedValue: null,
+        legacyCollapsedStoredValue: null,
+      }),
+    ).toEqual({
+      persistMarker: false,
+      persistMigratedValue: true,
+      persistTouch: true,
+      state: DEFAULT_THREAD_PRESENTATION_STATE,
+    });
+    expect(shouldWriteCollapsedMigrationMarker(null)).toBe(false);
+    expect(shouldWriteCollapsedMigrationMarker("false")).toBe(false);
+    expect(shouldWriteCollapsedMigrationMarker("true")).toBe(true);
   });
 
   it("keeps a hosted-pane collapse preference through presentation migration", () => {
@@ -679,5 +699,125 @@ describe("threadPresentationState", () => {
         getThreadPresentationStateStorageKey({ threadId: unknownAgeThreadId }),
       ),
     ).not.toBeNull();
+  });
+
+  it("does not write a migration marker for a fresh thread with no collapsed key", () => {
+    expect(
+      readThreadPresentationStateFromStorage({
+        hasCollapsedMigrationMarker: false,
+        storedValue: null,
+        legacyCollapsedStoredValue: null,
+      }).persistMarker,
+    ).toBe(false);
+  });
+
+  it("removes a marker when its presentation key is pruned and no collapsed key remains", () => {
+    const now = 1_700_000_000_000;
+    const threadId = "thr-prune-marker";
+    window.localStorage.setItem(
+      getThreadPresentationStateStorageKey({ threadId }),
+      serializeThreadPresentationState(
+        presentation({
+          mode: "work",
+          lastTouchedAt: now - THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS - 1,
+        }),
+      ),
+    );
+    window.localStorage.setItem(
+      getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+      "true",
+    );
+
+    pruneThreadPresentationStateStorage({ now });
+
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationStateStorageKey({ threadId }),
+      ),
+    ).toBeNull();
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+      ),
+    ).toBeNull();
+  });
+
+  it("removes an orphan marker with no presentation key and no collapsed key", () => {
+    const threadId = "thr-orphan-marker";
+    window.localStorage.setItem(
+      getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+      "true",
+    );
+
+    expect(
+      shouldRemovePresentationMigrationMarker({
+        hasCollapsedKey: false,
+        hasPresentationKey: false,
+        threadId,
+      }),
+    ).toBe(true);
+
+    pruneThreadPresentationStateStorage({ now: 1_700_000_000_000 });
+
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps a marker when a collapsed key still exists so re-seeding stays blocked", () => {
+    const now = 1_700_000_000_000;
+    const threadId = "thr-keep-marker";
+    window.localStorage.setItem(
+      getThreadPresentationStateStorageKey({ threadId }),
+      serializeThreadPresentationState(
+        presentation({
+          mode: "conversation",
+          lastTouchedAt: now - THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS - 1,
+        }),
+      ),
+    );
+    window.localStorage.setItem(
+      getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+      "true",
+    );
+    window.localStorage.setItem(
+      getThreadConversationCollapsedStorageKey({ threadId }),
+      "true",
+    );
+
+    expect(
+      shouldRemovePresentationMigrationMarker({
+        hasCollapsedKey: true,
+        hasPresentationKey: false,
+        threadId,
+      }),
+    ).toBe(false);
+
+    pruneThreadPresentationStateStorage({ now });
+
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationStateStorageKey({ threadId }),
+      ),
+    ).toBeNull();
+    expect(
+      window.localStorage.getItem(
+        getThreadConversationCollapsedStorageKey({ threadId }),
+      ),
+    ).toBe("true");
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+      ),
+    ).toBe("true");
+    expect(
+      readThreadPresentationStateFromStorage({
+        hasCollapsedMigrationMarker: true,
+        storedValue: null,
+        legacyCollapsedStoredValue: "true",
+      }).state.mode,
+    ).toBe("conversation");
   });
 });
