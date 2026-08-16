@@ -4,6 +4,7 @@ import { createStore, type Atom } from "jotai";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CONVERSATION_RAIL_WIDTH_STORAGE_KEY,
+  getThreadConversationCollapsedAtom,
   getThreadConversationCollapsedStorageKey,
   getThreadPresentationStateAtom,
   getThreadWorkModeAtom,
@@ -13,6 +14,7 @@ import {
 } from "./threadSecondaryPanelAtoms";
 import {
   DEFAULT_THREAD_PRESENTATION_STATE,
+  getThreadPresentationCollapsedMigrationMarkerKey,
   getThreadPresentationStateStorageKey,
   parseThreadPresentationState,
   serializeThreadPresentationState,
@@ -116,7 +118,14 @@ describe("thread presentation persistence", () => {
       window.localStorage.getItem(
         getThreadConversationCollapsedStorageKey({ threadId: "thr-legacy" }),
       ),
-    ).toBeNull();
+    ).toBe("true");
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationCollapsedMigrationMarkerKey({
+          threadId: "thr-legacy",
+        }),
+      ),
+    ).toBe("true");
     expect(
       hydrate((store) => store.get(getThreadWorkModeAtom("thr-other"))),
     ).toBe(false);
@@ -133,7 +142,7 @@ describe("thread presentation persistence", () => {
       window.localStorage.getItem(
         getThreadConversationCollapsedStorageKey({ threadId: "thr-other" }),
       ),
-    ).toBeNull();
+    ).toBe("false");
     expect(
       hydrate((store) =>
         store.get(getThreadPresentationStateAtom("thr-missing")),
@@ -147,6 +156,29 @@ describe("thread presentation persistence", () => {
     expect(
       hydrate((store) => store.get(getThreadWorkModeAtom("thr-other"))),
     ).toBe(false);
+  });
+
+  it("keeps a hosted collapse preference after presentation migration and reload", () => {
+    window.localStorage.setItem(
+      getThreadConversationCollapsedStorageKey({ threadId: "thr-hosted" }),
+      "true",
+    );
+
+    expect(
+      hydrate((store) =>
+        store.get(getThreadPresentationStateAtom("thr-hosted")),
+      ).mode,
+    ).toBe("work");
+    expect(
+      window.localStorage.getItem(
+        getThreadConversationCollapsedStorageKey({ threadId: "thr-hosted" }),
+      ),
+    ).toBe("true");
+    expect(
+      hydrate((store) =>
+        store.get(getThreadConversationCollapsedAtom("thr-hosted")),
+      ),
+    ).toBe(true);
   });
 
   it("does not let a stored presentation leak into another Thread on switch", () => {

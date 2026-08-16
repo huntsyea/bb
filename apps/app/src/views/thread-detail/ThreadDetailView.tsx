@@ -151,9 +151,9 @@ import {
   resolveThreadSurfaceArrangement,
 } from "./threadWorkMode";
 import {
-  areThreadPresentationStatesEqual,
   haveThreadTabsHydrated,
   resolveThreadPresentationRestore,
+  touchThreadPresentationState,
 } from "./threadPresentationState";
 import {
   WORK_MODE_NO_SURFACE_NOTICE,
@@ -1475,14 +1475,9 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     const didChangeThread = resetWorkSurfaceSnapshotIfThreadChanged();
     if (restoredPresentationThreadIdRef.current !== threadId) {
       restoredPresentationThreadIdRef.current = threadId;
-      if (
-        !areThreadPresentationStatesEqual(
-          presentationState,
-          restoreDecision.state,
-        )
-      ) {
-        setPresentationState(restoreDecision.state);
-      }
+      setPresentationState(
+        touchThreadPresentationState(restoreDecision.state, Date.now()),
+      );
       if (
         restoreDecision.activateTabId !== null &&
         restoreDecision.activateTabId !== activeFixedSecondaryTabId

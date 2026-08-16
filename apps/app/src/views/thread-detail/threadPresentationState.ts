@@ -18,6 +18,8 @@ export const THREAD_PRESENTATION_STATE_STORAGE_PREFIX =
   "bb.thread.presentation";
 export const THREAD_CONVERSATION_COLLAPSED_STORAGE_PREFIX =
   "bb.thread.conversation.collapsed";
+export const THREAD_PRESENTATION_COLLAPSED_MIGRATION_MARKER_PREFIX =
+  "bb.thread.presentation.collapsedMigrated";
 export const CONVERSATION_RAIL_WIDTH_STORAGE_KEY =
   "bb.thread.conversationRail.widthPercent";
 export const THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS =
@@ -63,6 +65,18 @@ export function getThreadConversationCollapsedStorageKey({
   threadId,
 }: ThreadPresentationStorageKeyArgs): string {
   return `${THREAD_CONVERSATION_COLLAPSED_STORAGE_PREFIX}-${encodeURIComponent(threadId)}`;
+}
+
+export function getThreadPresentationCollapsedMigrationMarkerKey({
+  threadId,
+}: ThreadPresentationStorageKeyArgs): string {
+  return `${THREAD_PRESENTATION_COLLAPSED_MIGRATION_MARKER_PREFIX}-${encodeURIComponent(threadId)}`;
+}
+
+export function hasThreadPresentationCollapsedMigrationMarker(
+  storedValue: string | null,
+): boolean {
+  return storedValue === "true";
 }
 
 export function threadIdFromPresentationStorageKey(key: string): string | null {
@@ -119,22 +133,44 @@ export function migrateLegacyCollapsedPresentationState(
 }
 
 export function resolveStoredThreadPresentationState(args: {
+  hasCollapsedMigrationMarker: boolean;
   legacyCollapsedStoredValue: string | null;
   storedValue: string | null;
 }): ThreadPresentationState {
   return readThreadPresentationStateFromStorage(args).state;
 }
 
+export function shouldPersistPresentationTouch(lastTouchedAt: number): boolean {
+  return lastTouchedAt <= 0;
+}
+
 export function readThreadPresentationStateFromStorage(args: {
+  hasCollapsedMigrationMarker: boolean;
   legacyCollapsedStoredValue: string | null;
   storedValue: string | null;
-}): { persistMigratedValue: boolean; state: ThreadPresentationState } {
+}): {
+  persistMigratedValue: boolean;
+  persistTouch: boolean;
+  state: ThreadPresentationState;
+} {
   const parsed = parseThreadPresentationState(args.storedValue);
   if (parsed !== null) {
-    return { persistMigratedValue: false, state: parsed };
+    return {
+      persistMigratedValue: false,
+      persistTouch: shouldPersistPresentationTouch(parsed.lastTouchedAt),
+      state: parsed,
+    };
+  }
+  if (args.hasCollapsedMigrationMarker) {
+    return {
+      persistMigratedValue: false,
+      persistTouch: true,
+      state: DEFAULT_THREAD_PRESENTATION_STATE,
+    };
   }
   return {
     persistMigratedValue: true,
+    persistTouch: true,
     state: migrateLegacyCollapsedPresentationState(
       args.legacyCollapsedStoredValue,
     ),
@@ -376,9 +412,6 @@ export function pruneThreadPresentationStateStorage(args: {
     const state = parseThreadPresentationState(localStorage.getItem(key));
     if (state === null) {
       localStorage.removeItem(key);
-      localStorage.removeItem(
-        getThreadConversationCollapsedStorageKey({ threadId }),
-      );
       continue;
     }
     if (
@@ -392,9 +425,6 @@ export function pruneThreadPresentationStateStorage(args: {
       continue;
     }
     localStorage.removeItem(key);
-    localStorage.removeItem(
-      getThreadConversationCollapsedStorageKey({ threadId }),
-    );
   }
 }
 

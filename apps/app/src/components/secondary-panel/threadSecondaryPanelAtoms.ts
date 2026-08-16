@@ -10,7 +10,9 @@ import {
   CONVERSATION_RAIL_WIDTH_STORAGE_KEY,
   DEFAULT_THREAD_PRESENTATION_STATE,
   getThreadConversationCollapsedStorageKey,
+  getThreadPresentationCollapsedMigrationMarkerKey,
   getThreadPresentationStateStorageKey,
+  hasThreadPresentationCollapsedMigrationMarker,
   parseConversationRailWidthPercent,
   parseThreadPresentationState,
   serializeThreadPresentationState,
@@ -126,21 +128,29 @@ const threadPresentationStateStorage: SyncStorage<ThreadPresentationState> = {
     const storedValue = window.localStorage.getItem(key);
     const resolved = readThreadPresentationStateFromStorage({
       storedValue,
+      hasCollapsedMigrationMarker:
+        threadId !== null &&
+        hasThreadPresentationCollapsedMigrationMarker(
+          window.localStorage.getItem(
+            getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+          ),
+        ),
       legacyCollapsedStoredValue:
         threadId === null ? null : readLegacyCollapsedStoredValue(threadId),
     });
-    if (resolved.persistMigratedValue) {
+    if (resolved.persistMigratedValue || resolved.persistTouch) {
       window.localStorage.setItem(
         key,
         serializeThreadPresentationState(
           touchThreadPresentationState(resolved.state, Date.now()),
         ),
       );
-      if (threadId !== null) {
-        window.localStorage.removeItem(
-          getThreadConversationCollapsedStorageKey({ threadId }),
-        );
-      }
+    }
+    if (resolved.persistMigratedValue && threadId !== null) {
+      window.localStorage.setItem(
+        getThreadPresentationCollapsedMigrationMarkerKey({ threadId }),
+        "true",
+      );
     }
     return resolved.state;
   },

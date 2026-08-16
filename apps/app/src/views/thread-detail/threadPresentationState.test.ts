@@ -19,8 +19,11 @@ import {
   parseThreadPresentationState,
   pruneThreadPresentationStateStorage,
   shouldPruneThreadPresentationState,
+  shouldPersistPresentationTouch,
   getThreadConversationCollapsedStorageKey,
+  getThreadPresentationCollapsedMigrationMarkerKey,
   THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS,
+  touchThreadPresentationState,
   readThreadPresentationStateFromStorage,
   resolveStoredThreadPresentationState,
   resolveThreadPresentationRestore,
@@ -138,6 +141,7 @@ describe("threadPresentationState", () => {
 
     expect(
       resolveStoredThreadPresentationState({
+        hasCollapsedMigrationMarker: false,
         storedValue: stored,
         legacyCollapsedStoredValue: "true",
       }),
@@ -421,15 +425,18 @@ describe("threadPresentationState", () => {
   it("writes a migrated presentation once so later collapsed values cannot re-seed Work mode", () => {
     expect(
       readThreadPresentationStateFromStorage({
+        hasCollapsedMigrationMarker: false,
         storedValue: null,
         legacyCollapsedStoredValue: "true",
       }),
     ).toEqual({
       persistMigratedValue: true,
+      persistTouch: true,
       state: presentation({ mode: "work" }),
     });
     expect(
       readThreadPresentationStateFromStorage({
+        hasCollapsedMigrationMarker: false,
         storedValue: serializeThreadPresentationState(
           presentation({ mode: "conversation" }),
         ),
@@ -437,8 +444,119 @@ describe("threadPresentationState", () => {
       }),
     ).toEqual({
       persistMigratedValue: false,
+      persistTouch: true,
       state: presentation({ mode: "conversation" }),
     });
+    expect(
+      readThreadPresentationStateFromStorage({
+        hasCollapsedMigrationMarker: true,
+        storedValue: null,
+        legacyCollapsedStoredValue: "true",
+      }),
+    ).toEqual({
+      persistMigratedValue: false,
+      persistTouch: true,
+      state: DEFAULT_THREAD_PRESENTATION_STATE,
+    });
+  });
+
+  it("keeps a hosted-pane collapse preference through presentation migration", () => {
+    const collapsedKey = getThreadConversationCollapsedStorageKey({
+      threadId: "thr-hosted",
+    });
+    const markerKey = getThreadPresentationCollapsedMigrationMarkerKey({
+      threadId: "thr-hosted",
+    });
+    expect(
+      readThreadPresentationStateFromStorage({
+        hasCollapsedMigrationMarker: false,
+        storedValue: null,
+        legacyCollapsedStoredValue: "true",
+      }).state.mode,
+    ).toBe("work");
+    expect(collapsedKey).toContain("conversation.collapsed");
+    expect(markerKey).toContain("collapsedMigrated");
+    expect(
+      readThreadPresentationStateFromStorage({
+        hasCollapsedMigrationMarker: true,
+        storedValue: null,
+        legacyCollapsedStoredValue: "true",
+      }).state.mode,
+    ).toBe("conversation");
+  });
+
+  it("does not expire a daily-use record after it is touched on read", () => {
+    const openedAt = 1_700_000_000_000;
+    const nextDay = openedAt + 24 * 60 * 60 * 1000;
+    const daily = presentation({
+      mode: "work",
+      lastTouchedAt: openedAt,
+    });
+    expect(
+      shouldPruneThreadPresentationState({
+        now: openedAt + THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS + 1,
+        state: daily,
+        threadId: "thr-daily",
+      }),
+    ).toBe(true);
+    const touched = touchThreadPresentationState(daily, nextDay);
+    expect(
+      shouldPruneThreadPresentationState({
+        now: nextDay,
+        state: touched,
+        threadId: "thr-daily",
+      }),
+    ).toBe(false);
+    expect(
+      shouldPruneThreadPresentationState({
+        now: nextDay + THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS + 1,
+        state: touched,
+        threadId: "thr-daily",
+      }),
+    ).toBe(true);
+  });
+
+  it("touches a record with no lastTouchedAt so normal expiry applies", () => {
+    const now = 1_700_000_000_000;
+    const parsed = parseThreadPresentationState(
+      JSON.stringify({
+        version: THREAD_PRESENTATION_STATE_VERSION,
+        mode: "work",
+        activeEligibleTabId: null,
+        recencyTabIds: [],
+      }),
+    );
+    expect(parsed?.lastTouchedAt).toBe(0);
+    expect(shouldPersistPresentationTouch(parsed?.lastTouchedAt ?? 0)).toBe(
+      true,
+    );
+    const resolved = readThreadPresentationStateFromStorage({
+      hasCollapsedMigrationMarker: false,
+      storedValue: JSON.stringify({
+        version: THREAD_PRESENTATION_STATE_VERSION,
+        mode: "work",
+        activeEligibleTabId: null,
+        recencyTabIds: [],
+      }),
+      legacyCollapsedStoredValue: null,
+    });
+    expect(resolved.persistTouch).toBe(true);
+    const touched = touchThreadPresentationState(resolved.state, now);
+    expect(touched.lastTouchedAt).toBe(now);
+    expect(
+      shouldPruneThreadPresentationState({
+        now: now + THREAD_PRESENTATION_STATE_IDLE_EXPIRY_MS + 1,
+        state: touched,
+        threadId: "thr-old",
+      }),
+    ).toBe(true);
+    expect(
+      shouldPruneThreadPresentationState({
+        now,
+        state: touched,
+        threadId: "thr-old",
+      }),
+    ).toBe(false);
   });
 
   it("accepts a stored rail width and rejects invalid values", () => {
@@ -460,7 +578,7 @@ describe("threadPresentationState", () => {
     );
   });
 
-  it("prunes only expired presentation records and their collapsed keys", () => {
+  it("prunes only expired presentation records and leaves collapse keys alone", () => {
     const now = 1_700_000_000_000;
     const mountedThreadId = "thr-mounted";
     const recentThreadId = "thr-recent";
@@ -555,7 +673,7 @@ describe("threadPresentationState", () => {
       window.localStorage.getItem(
         getThreadConversationCollapsedStorageKey({ threadId: expiredThreadId }),
       ),
-    ).toBeNull();
+    ).toBe("true");
     expect(
       window.localStorage.getItem(
         getThreadPresentationStateStorageKey({ threadId: unknownAgeThreadId }),
