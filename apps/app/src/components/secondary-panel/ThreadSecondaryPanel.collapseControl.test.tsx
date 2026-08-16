@@ -41,6 +41,7 @@ function renderPanel(args: {
   onToggleConversationCollapse: () => void;
   isWorkMode?: boolean;
   onToggleWorkMode?: () => void;
+  renderAsDrawer?: boolean;
   withoutResizablePanel?: boolean;
   workModeToggleId?: string;
 }) {
@@ -190,6 +191,40 @@ describe("ThreadSecondaryPanel Work mode control", () => {
     expect(view.getByRole("button", { name: "Enter Work mode" }).id).toBe(
       "thread-work-mode-toggle-pane-1",
     );
+  });
+
+  /**
+   * The compact drawer holds the work surface before Work mode promotes it to
+   * the page, so the Work mode control is the only way in — the conversation
+   * collapse fallback is wide-layout-only and stays out of the drawer.
+   */
+  it("keeps the Work mode control in the compact drawer and nothing in its place", () => {
+    const offeredView = renderPanel({
+      isConversationCollapsed: false,
+      onToggleConversationCollapse: noop,
+      onToggleWorkMode: noop,
+      renderAsDrawer: true,
+    });
+    expect(
+      offeredView.getByRole("button", { name: "Enter Work mode" }),
+    ).not.toBeNull();
+
+    cleanup();
+
+    const withoutWorkModeView = renderPanel({
+      isConversationCollapsed: false,
+      onToggleConversationCollapse: noop,
+      renderAsDrawer: true,
+    });
+    expect(
+      withoutWorkModeView.queryByRole("button", { name: "Enter Work mode" }),
+    ).toBeNull();
+    expect(
+      withoutWorkModeView.queryByRole("button", { name: "Full Screen" }),
+    ).toBeNull();
+    expect(
+      withoutWorkModeView.queryByRole("button", { name: "Exit Full Screen" }),
+    ).toBeNull();
   });
 
   it("operates from the keyboard in both states", () => {
