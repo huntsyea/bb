@@ -66,7 +66,7 @@ const threadStore = vi.hoisted(
 const experimentState = vi.hoisted(() => ({ enabled: true }));
 const viewportState = vi.hoisted(() => ({ compact: false }));
 const sidebarState = vi.hoisted(() => ({ showing: true }));
-const panelFullScreenState = vi.hoisted(() => ({
+const conversationCollapseState = vi.hoisted(() => ({
   isMainCollapsed: false,
 }));
 const panelGroupLayoutState = vi.hoisted(() => ({ layout: [100, 0] }));
@@ -264,7 +264,7 @@ vi.mock("./ThreadDetailView", () => ({
       () => ({
         composerHost,
         contentKey: threadId,
-        isMainCollapsed: panelFullScreenState.isMainCollapsed,
+        isMainCollapsed: conversationCollapseState.isMainCollapsed,
         isOpen: isPanelOpen,
         panel: (
           <div data-testid={`hosted-panel-${threadId}`}>
@@ -636,7 +636,7 @@ beforeEach(() => {
   experimentState.enabled = true;
   viewportState.compact = false;
   sidebarState.showing = true;
-  panelFullScreenState.isMainCollapsed = false;
+  conversationCollapseState.isMainCollapsed = false;
   panelGroupLayoutState.layout = [100, 0];
   commandHandlers.clear();
   commandPresentationState.isModifierHeld = false;
@@ -1023,8 +1023,8 @@ describe("SplitThreadArea", () => {
     expect(paneA?.getAttribute("data-maximized")).toBeNull();
   });
 
-  it("temporarily replaces panel full screen with a clean thread full screen", async () => {
-    panelFullScreenState.isMainCollapsed = true;
+  it("temporarily replaces the conversation collapse with a clean thread full screen", async () => {
+    conversationCollapseState.isMainCollapsed = true;
     renderSplitArea({
       path: threadPath("thr-a"),
       layout: twoPaneLayout("pane-1"),
