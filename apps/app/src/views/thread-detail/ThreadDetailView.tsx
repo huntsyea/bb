@@ -147,6 +147,7 @@ import {
 } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
 import {
   canEnterThreadWorkMode,
+  canRequestThreadWorkMode,
   resolveThreadPresentationMode,
   resolveThreadSurfaceArrangement,
 } from "./threadWorkMode";
@@ -521,10 +522,12 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   const { projectId, threadId } = props;
   const {
     isFocused,
+    isMaximized,
     navigateInPane,
     onRequestClose,
     isBoundedPane,
     secondaryPanelHost,
+    setWorkModeMaximized,
   } = usePaneContext();
   const navigate = useNavigate();
   useFixedPanelTabsStorageMaintenance(threadId);
@@ -1377,7 +1380,6 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     getThreadConversationCollapsedAtom(threadId),
   );
   const isConversationCollapsed = storedConversationCollapsed;
-  // Hosted split panes still use the resource-only collapse until BB-6.
   const toggleConversationCollapse = useCallback(() => {
     setStoredConversationCollapsed((collapsed) => !collapsed);
   }, [setStoredConversationCollapsed]);
@@ -1392,9 +1394,15 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   const hasEligibleSurface = hasEligibleWorkSurface(
     fixedPanelTabsState.secondary.tabs,
   );
+  const canRequestWorkMode = canRequestThreadWorkMode({
+    hasEligibleWorkSurface: hasEligibleSurface,
+    isCompactViewport: renderSecondaryPanelAsDrawer,
+    isSecondaryPanelOpen,
+  });
   const canEnterWorkMode = canEnterThreadWorkMode({
     hasEligibleWorkSurface: hasEligibleSurface,
     isCompactViewport: renderSecondaryPanelAsDrawer,
+    isMaximizedPane: isMaximized,
     isSecondaryPanelOpen,
     isStandaloneLayout,
   });
@@ -1411,6 +1419,19 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
       ),
     localTabCount: fixedPanelTabsState.secondary.tabs.length,
   });
+  // A hosted pane in Work mode needs the whole workspace, so it claims a
+  // Work-mode-owned maximization of its own pane and releases it on every exit
+  // (mode off, panel closed, viewport compact, work surface gone, focus moved
+  // to a sibling pane). The claim is a no-op when the user already maximized
+  // this pane, so that maximization survives leaving Work mode.
+  const wantsPaneMaximizedForWorkMode =
+    isWorkMode && isFocused && !isStandaloneLayout && canRequestWorkMode;
+  useEffect(() => {
+    if (setWorkModeMaximized === null) {
+      return;
+    }
+    setWorkModeMaximized(wantsPaneMaximizedForWorkMode);
+  }, [setWorkModeMaximized, wantsPaneMaximizedForWorkMode]);
   const surfaceArrangement = resolveThreadSurfaceArrangement(
     resolveThreadPresentationMode(isWorkModeActive),
   );
@@ -1795,15 +1816,9 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   });
   useAppCommandHandler("thread.workMode.toggle", () => {
     if (!isFocused) return false;
-    if (
-      !isWorkMode &&
-      !canEnterThreadWorkMode({
-        hasEligibleWorkSurface: hasEligibleSurface,
-        isCompactViewport: renderSecondaryPanelAsDrawer,
-        isSecondaryPanelOpen,
-        isStandaloneLayout,
-      })
-    ) {
+    // The offer gate, not the active gate: a hosted pane may enter Work mode
+    // before it is maximized — entering is what maximizes it.
+    if (!isWorkMode && !canRequestWorkMode) {
       return false;
     }
     toggleWorkMode();

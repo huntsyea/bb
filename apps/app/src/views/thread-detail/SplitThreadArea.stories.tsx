@@ -238,6 +238,7 @@ const CONTROL_CONTEXT: PaneContextValue = {
   onRequestClose: () => {},
   isMaximized: false,
   onToggleMaximize: () => {},
+  setWorkModeMaximized: null,
   onMoveToSide: () => {},
   isBoundedPane: true,
   isTopRow: true,

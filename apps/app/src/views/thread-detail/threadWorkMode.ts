@@ -38,17 +38,44 @@ export function toggleThreadPresentationMode(
   return mode === "work" ? "conversation" : "work";
 }
 
+/**
+ * Whether this Thread may offer Work mode at all.
+ *
+ * A hosted split pane qualifies before it is maximized: entering Work mode is
+ * what maximizes it, so gating the offer on the maximization would be circular
+ * and the toggle could never be reached.
+ */
+export function canRequestThreadWorkMode(args: {
+  hasEligibleWorkSurface: boolean;
+  isCompactViewport: boolean;
+  isSecondaryPanelOpen: boolean;
+}): boolean {
+  return (
+    args.isSecondaryPanelOpen &&
+    !args.isCompactViewport &&
+    args.hasEligibleWorkSurface
+  );
+}
+
+/**
+ * Whether Work mode may actually render as the work-surface-primary layout.
+ *
+ * Work mode owns the full width of the window, so a hosted pane must hold the
+ * whole workspace first. A standalone surface already does; a split pane does
+ * once it is maximized. Between the request and the maximization the Thread
+ * stays in the conversation layout for one commit, which is what keeps the
+ * conversation rail out of every visible split pane.
+ */
 export function canEnterThreadWorkMode(args: {
   hasEligibleWorkSurface: boolean;
   isCompactViewport: boolean;
+  isMaximizedPane: boolean;
   isSecondaryPanelOpen: boolean;
   isStandaloneLayout: boolean;
 }): boolean {
   return (
-    args.isStandaloneLayout &&
-    args.isSecondaryPanelOpen &&
-    !args.isCompactViewport &&
-    args.hasEligibleWorkSurface
+    (args.isStandaloneLayout || args.isMaximizedPane) &&
+    canRequestThreadWorkMode(args)
   );
 }
 

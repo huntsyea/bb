@@ -40,6 +40,7 @@ const PANE_CONTEXT: PaneContextValue = {
   onRequestClose: null,
   isMaximized: false,
   onToggleMaximize: null,
+  setWorkModeMaximized: null,
   isBoundedPane: false,
   isTopRow: true,
   ownsWindowTopLeft: true,

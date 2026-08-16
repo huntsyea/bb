@@ -9,7 +9,14 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { createStore, Provider as JotaiProvider } from "jotai";
-import { useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { PERSONAL_PROJECT_ID } from "@bb/domain";
@@ -17,7 +24,11 @@ import { TooltipProvider } from "@bb/shared-ui/tooltip";
 import type { BbDesktopInfo } from "@bb/desktop-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQueryClientTestHarness } from "@/test/queryClientTestHarness";
-import { maximizedPaneIdAtom, splitLayoutAtom } from "@/lib/split-layout/atoms";
+import {
+  maximizedPaneIdAtom,
+  splitLayoutAtom,
+  workModeMaximizedPaneIdAtom,
+} from "@/lib/split-layout/atoms";
 import {
   listPanes,
   movePane,
@@ -166,15 +177,27 @@ vi.mock("react-resizable-panels", async () => {
     id,
     onCollapse,
     onResize,
+    order,
+    style,
   }: {
     children?: ReactNode;
     id?: string;
     onCollapse?: () => void;
     onResize?: (size: number) => void;
+    order?: number;
+    style?: CSSProperties;
   }) => {
     if (id !== undefined) panelCallbacks.set(id, { onCollapse, onResize });
     return (
-      <div data-testid="workspace-panel" data-panel-id={id}>
+      <div
+        data-testid="workspace-panel"
+        data-panel-id={id}
+        // Expose both orders: `order` is the group's layout-array position and
+        // CSS `order` is where the panel actually paints. Work mode swaps the
+        // sides through these without moving any React child.
+        data-panel-order={order}
+        data-visual-order={style?.order}
+      >
         {children}
       </div>
     );
@@ -250,6 +273,17 @@ vi.mock("./ThreadDetailView", () => ({
       pane?.secondaryPanelHost ?? null,
       panelModel,
     );
+    // Mirrors ThreadDetailView's Work mode claim: a hosted pane asks for the
+    // whole workspace while it is in Work mode and focused, and releases on
+    // every exit. The view's own eligibility gates are exercised in
+    // threadWorkMode.test.ts; this fixture drives the split-workspace seam.
+    const [isWorkMode, setIsWorkMode] = useState(false);
+    const setWorkModeMaximized = pane?.setWorkModeMaximized ?? null;
+    const wantsWorkModeMaximized = isWorkMode && (pane?.isFocused ?? false);
+    useEffect(() => {
+      if (setWorkModeMaximized === null) return;
+      setWorkModeMaximized(wantsWorkModeMaximized);
+    }, [setWorkModeMaximized, wantsWorkModeMaximized]);
     const draft = usePromptDraftStorage({
       kind: "thread",
       projectId,
@@ -303,6 +337,27 @@ vi.mock("./ThreadDetailView", () => ({
             move right
           </button>
         ) : null}
+        {setWorkModeMaximized !== null ? (
+          <button
+            type="button"
+            data-testid={`work-mode-${threadId}`}
+            onClick={() => setIsWorkMode((active) => !active)}
+          >
+            {isWorkMode ? "leave work mode" : "enter work mode"}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          data-testid={`navigate-in-pane-${threadId}`}
+          onClick={() =>
+            pane?.navigateInPane({
+              projectId: PERSONAL_PROJECT_ID,
+              threadId: "thr-c",
+            })
+          }
+        >
+          go to thr-c
+        </button>
       </div>
     );
   },
@@ -548,6 +603,7 @@ beforeEach(() => {
   commandPresentationState.shortcut = null;
   threadStore.set("thr-a", { archivedAt: null, deletedAt: null });
   threadStore.set("thr-b", { archivedAt: null, deletedAt: null });
+  threadStore.set("thr-c", { archivedAt: null, deletedAt: null });
 });
 
 afterEach(() => {
@@ -603,6 +659,195 @@ describe("SplitThreadArea", () => {
     fireEvent.change(screen.getByTestId("draft-thr-b"), {
       target: { value: "" },
     });
+  });
+
+  it("gives Work mode the whole workspace without rewriting the split tree", async () => {
+    const initialLayout = twoPaneLayout("pane-1");
+    const store = renderSplitArea({
+      path: threadPath("thr-a"),
+      layout: initialLayout,
+    });
+    fireEvent.change(await screen.findByTestId("draft-thr-b"), {
+      target: { value: "hidden sibling draft" },
+    });
+
+    fireEvent.click(screen.getByTestId("work-mode-thr-a"));
+
+    const paneA = document.querySelector<HTMLElement>(
+      '[data-split-pane-id="pane-1"]',
+    );
+    const paneB = document.querySelector<HTMLElement>(
+      '[data-split-pane-id="pane-2"]',
+    );
+    expect(paneA?.getAttribute("data-maximized")).toBe("true");
+    expect(paneB?.getAttribute("aria-hidden")).toBe("true");
+    expect(store.get(maximizedPaneIdAtom)).toBe("pane-1");
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBe("pane-1");
+    expect(store.get(splitLayoutAtom)?.root).toEqual(initialLayout.root);
+
+    // The work surface becomes primary: the window panel is no longer
+    // suppressed by the maximization, it paints first, and the split tree
+    // (the conversation) shrinks to the rail width on the right.
+    const mainPanel = document.querySelector<HTMLElement>(
+      '[data-panel-id="split-workspace-main-panel"]',
+    );
+    expect(mainPanel?.getAttribute("data-panel-order")).toBe("2");
+    expect(mainPanel?.getAttribute("data-visual-order")).toBe("3");
+    await waitFor(() => {
+      expect(panelGroupLayoutState.layout).toEqual([64, 36]);
+    });
+
+    // Exactly one rail, hosted at the window, and only for the pane that
+    // entered Work mode. The hidden sibling keeps its mounted state.
+    expect(screen.queryAllByTestId("hosted-panel-thr-a")).toHaveLength(1);
+    expect(screen.queryByTestId("hosted-panel-thr-b")).toBeNull();
+    expect(
+      (screen.getByTestId("draft-thr-b") as HTMLTextAreaElement).value,
+    ).toBe("hidden sibling draft");
+    fireEvent.change(screen.getByTestId("draft-thr-b"), {
+      target: { value: "" },
+    });
+  });
+
+  it("restores the exact split when Work mode releases the maximization it owns", async () => {
+    const initialLayout = twoPaneLayout("pane-1");
+    const store = renderSplitArea({
+      path: threadPath("thr-a"),
+      layout: initialLayout,
+    });
+    fireEvent.change(await screen.findByTestId("draft-thr-b"), {
+      target: { value: "survives the round trip" },
+    });
+
+    fireEvent.click(screen.getByTestId("work-mode-thr-a"));
+    fireEvent.click(screen.getByTestId("work-mode-thr-a"));
+
+    const paneA = document.querySelector<HTMLElement>(
+      '[data-split-pane-id="pane-1"]',
+    );
+    const paneB = document.querySelector<HTMLElement>(
+      '[data-split-pane-id="pane-2"]',
+    );
+    expect(paneA?.getAttribute("data-maximized")).toBeNull();
+    expect(paneB?.className).not.toContain("invisible");
+    expect(store.get(maximizedPaneIdAtom)).toBeNull();
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBeNull();
+    // Pane identities, ratios, and focus all come back untouched, because the
+    // maximization never wrote to the tree in the first place.
+    expect(store.get(splitLayoutAtom)).toEqual(initialLayout);
+    expect(listPanes(initialLayout.root).map((pane) => pane.paneId)).toEqual([
+      "pane-1",
+      "pane-2",
+    ]);
+    expect(
+      (screen.getByTestId("draft-thr-b") as HTMLTextAreaElement).value,
+    ).toBe("survives the round trip");
+    const mainPanel = document.querySelector<HTMLElement>(
+      '[data-panel-id="split-workspace-main-panel"]',
+    );
+    expect(mainPanel?.getAttribute("data-panel-order")).toBe("1");
+    expect(mainPanel?.getAttribute("data-visual-order")).toBeNull();
+    fireEvent.change(screen.getByTestId("draft-thr-b"), {
+      target: { value: "" },
+    });
+  });
+
+  it("leaves a user's own maximization in place after Work mode exits", async () => {
+    const store = renderSplitArea({
+      path: threadPath("thr-a"),
+      layout: twoPaneLayout("pane-1"),
+    });
+
+    fireEvent.click(await screen.findByTestId("maximize-thr-a"));
+    expect(store.get(maximizedPaneIdAtom)).toBe("pane-1");
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBeNull();
+
+    // Work mode claims nothing it did not cause, so the recorded owner stays
+    // empty and the exit has no split to restore.
+    fireEvent.click(screen.getByTestId("work-mode-thr-a"));
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBeNull();
+    expect(store.get(maximizedPaneIdAtom)).toBe("pane-1");
+
+    fireEvent.click(screen.getByTestId("work-mode-thr-a"));
+
+    const paneA = document.querySelector<HTMLElement>(
+      '[data-split-pane-id="pane-1"]',
+    );
+    const paneB = document.querySelector<HTMLElement>(
+      '[data-split-pane-id="pane-2"]',
+    );
+    expect(paneA?.getAttribute("data-maximized")).toBe("true");
+    expect(paneB?.getAttribute("aria-hidden")).toBe("true");
+    expect(store.get(maximizedPaneIdAtom)).toBe("pane-1");
+  });
+
+  it("restores the hidden split before navigating the pane to another thread", async () => {
+    const initialLayout = twoPaneLayout("pane-1");
+    const store = renderSplitArea({
+      path: threadPath("thr-a"),
+      layout: initialLayout,
+    });
+
+    fireEvent.click(await screen.findByTestId("work-mode-thr-a"));
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBe("pane-1");
+
+    fireEvent.click(screen.getByTestId("navigate-in-pane-thr-a"));
+
+    await screen.findByTestId("pane-thr-c");
+    expect(store.get(maximizedPaneIdAtom)).toBeNull();
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBeNull();
+    expect(screen.getByTestId("location").textContent).toBe(
+      threadPath("thr-c"),
+    );
+    const paneB = document.querySelector<HTMLElement>(
+      '[data-split-pane-id="pane-2"]',
+    );
+    expect(paneB?.getAttribute("aria-hidden")).toBeNull();
+    expect(store.get(splitLayoutAtom)?.root).toEqual({
+      ...initialLayout.root,
+      children: [
+        {
+          type: "pane",
+          paneId: "pane-1",
+          content: threadContent("thr-c"),
+        },
+        { type: "pane", paneId: "pane-2", content: threadContent("thr-b") },
+      ],
+    });
+    // The source Thread's work surface never follows the pane: the window
+    // panel now belongs to the destination Thread alone.
+    expect(screen.queryByTestId("hosted-panel-thr-a")).toBeNull();
+  });
+
+  it("keeps each Thread's work surface with its own pane when focus moves", async () => {
+    const initialLayout = twoPaneLayout("pane-1");
+    const store = renderSplitArea({
+      path: threadPath("thr-a"),
+      layout: initialLayout,
+    });
+
+    fireEvent.click(await screen.findByTestId("work-mode-thr-a"));
+    expect(screen.getByTestId("hosted-composer-scope-thr-a").textContent).toBe(
+      "thr-a",
+    );
+
+    // Focusing the sibling ends thr-a's claim on the workspace, so the split
+    // returns and thr-b's own panel takes over the window host.
+    fireEvent.pointerDown(screen.getByTestId("pane-thr-b"));
+
+    await screen.findByTestId("hosted-panel-thr-b");
+    expect(screen.queryByTestId("hosted-panel-thr-a")).toBeNull();
+    expect(screen.getByTestId("hosted-composer-scope-thr-b").textContent).toBe(
+      "thr-b",
+    );
+    expect(store.get(maximizedPaneIdAtom)).toBeNull();
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBeNull();
+    expect(store.get(splitLayoutAtom)?.root).toEqual(initialLayout.root);
+    // thr-b never inherits thr-a's Work mode, so the workspace stays a split.
+    const paneA = document.querySelector<HTMLElement>(
+      '[data-split-pane-id="pane-1"]',
+    );
+    expect(paneA?.getAttribute("data-maximized")).toBeNull();
   });
 
   it("temporarily replaces panel full screen with a clean thread full screen", async () => {

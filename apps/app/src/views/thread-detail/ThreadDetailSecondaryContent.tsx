@@ -150,13 +150,21 @@ function ThreadDetailSecondaryContentBody({
   const isSecondaryPanelResizing = useAtomValue(
     threadSecondaryPanelResizingAtom,
   );
-  // Hosted split panes still collapse the conversation. Standalone Thread
-  // detail uses Work mode instead, which keeps the conversation visible.
   const isStandaloneWideLayout = secondaryPanelHost === null && !renderAsDrawer;
+  // `isWorkMode` already carries the caller's eligibility gate, which for a
+  // hosted pane includes holding the whole workspace. A hosted pane that
+  // reaches this point therefore renders the same work-surface-primary layout
+  // as the standalone surface — the conversation rail exists once, in the
+  // maximized pane, never in every visible split pane.
   const isWorkModeActive =
-    isStandaloneWideLayout && isWorkMode && isSecondaryPanelOpen;
+    isWorkMode && isSecondaryPanelOpen && !renderAsDrawer;
+  // Conversation collapse is the hosted-pane fallback for panes that have no
+  // Work mode to offer. Work mode supersedes it wherever it is active.
   const canCollapseConversation =
-    !isStandaloneWideLayout && isSecondaryPanelOpen && !renderAsDrawer;
+    !isStandaloneWideLayout &&
+    !isWorkModeActive &&
+    isSecondaryPanelOpen &&
+    !renderAsDrawer;
   const isConversationCollapsedActive =
     canCollapseConversation && isConversationCollapsed;
   const layoutSizes = resolveThreadWorkModeLayoutSizes({
@@ -340,6 +348,13 @@ function ThreadDetailSecondaryContentBody({
       ),
     [hasForks, isMetadataLoading, stableMetadata],
   );
+  // A hosted pane with no eligible work surface keeps the conversation-collapse
+  // control: swapping in a permanently disabled Work mode control there would
+  // take away a working affordance. The standalone surface has no collapse
+  // fallback, so it always shows the Work mode control.
+  const showsWorkModeControl =
+    !renderAsDrawer &&
+    (isStandaloneWideLayout || threadSecondaryPanelProps.canEnterWorkMode);
   const inlineSecondaryPanelContent = useMemo(
     () =>
       !renderAsDrawer ? (
@@ -350,9 +365,7 @@ function ThreadDetailSecondaryContentBody({
           isConversationCollapsed={isConversationCollapsedActive}
           onToggleConversationCollapse={onToggleConversationCollapse}
           isWorkMode={isWorkModeActive}
-          onToggleWorkMode={
-            isStandaloneWideLayout ? onToggleWorkMode : undefined
-          }
+          onToggleWorkMode={showsWorkModeControl ? onToggleWorkMode : undefined}
           // The owning thread or workspace header shows a closed panel. Once
           // open, collapse belongs at the outer edge of the panel toolbar.
           inlinePanelToggle="button"
@@ -363,13 +376,26 @@ function ThreadDetailSecondaryContentBody({
               ? undefined
               : `thread-detail-secondary-panel-${paneId}`
           }
+          // A hosted panel is a sibling of the split tree inside the window
+          // host's PanelGroup. In Work mode it swaps to the primary (left)
+          // side, and the split tree — the maximized pane's conversation —
+          // becomes the rail. Only the CSS order moves; the React children
+          // keep their positions, so nothing remounts.
+          resizablePanelLayout={
+            secondaryPanelHost !== null && isWorkModeActive
+              ? {
+                  panelOrder: 1,
+                  resizeHandleVisualOrder: 2,
+                  visualOrder: 1,
+                }
+              : undefined
+          }
           metadataContent={metadataContent}
         />
       ) : null,
     [
       browserDeck,
       isConversationCollapsedActive,
-      isStandaloneWideLayout,
       isWorkModeActive,
       metadataContent,
       onToggleConversationCollapse,
@@ -377,6 +403,7 @@ function ThreadDetailSecondaryContentBody({
       paneId,
       renderAsDrawer,
       secondaryPanelHost,
+      showsWorkModeControl,
       threadSecondaryPanelProps,
     ],
   );

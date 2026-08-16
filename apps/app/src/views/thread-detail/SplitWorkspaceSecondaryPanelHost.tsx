@@ -23,7 +23,11 @@ import {
   useAppCommandHandler,
   useAppCommandShortcut,
 } from "@/components/commands/AppCommandProvider";
-import { secondaryPanelWidthPercentAtom } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
+import {
+  conversationRailWidthPercentAtom,
+  secondaryPanelWidthPercentAtom,
+  threadSecondaryPanelResizingAtom,
+} from "@/components/secondary-panel/threadSecondaryPanelAtoms";
 import {
   THREAD_SECONDARY_PANEL_MAX_SIZE_PERCENT,
   THREAD_SECONDARY_PANEL_MIN_SIZE_PERCENT,
@@ -44,6 +48,12 @@ import {
   type PaneSecondaryPanelRegistry,
   usePaneSecondaryPanelModel,
 } from "./PaneContext";
+import {
+  CONVERSATION_RAIL_MAX_SIZE_PERCENT,
+  CONVERSATION_RAIL_MIN_SIZE_PERCENT,
+  constrainConversationRailWidthPercent,
+  resolveConversationRailWidthUpdate,
+} from "./threadWorkMode";
 
 const MAIN_PANEL_OPEN_SIZE_PERCENT = 100;
 const MAIN_PANEL_MIN_SIZE_PERCENT = 30;
@@ -52,6 +62,14 @@ interface SplitWorkspaceSecondaryPanelHostProps {
   children: ReactNode;
   focusedPaneId: string;
   isPaneMaximized: boolean;
+  /**
+   * Whether the maximization is Work mode's own. The maximized pane then holds
+   * the whole workspace for a work-surface-primary layout: the published panel
+   * becomes the primary surface on the left and the split tree — which is that
+   * one pane's header and timeline — becomes the conversation rail on the
+   * right. Ordinary maximization still suppresses the window panel entirely.
+   */
+  isWorkModeMaximized: boolean;
   registry: PaneSecondaryPanelRegistry;
 }
 
@@ -59,6 +77,7 @@ export function SplitWorkspaceSecondaryPanelHost({
   children,
   focusedPaneId,
   isPaneMaximized,
+  isWorkModeMaximized,
   registry,
 }: SplitWorkspaceSecondaryPanelHostProps) {
   const model = usePaneSecondaryPanelModel(registry, focusedPaneId);
@@ -116,6 +135,25 @@ export function SplitWorkspaceSecondaryPanelHost({
     if (model.isOpen !== isPanelVisible) model.onToggle();
   }, [focusedPaneId, isPanelVisible, model]);
 
+  // Work mode only reaches the window layout once the maximized pane actually
+  // publishes an open panel; until then the maximized pane stays a plain
+  // full-screen conversation.
+  const isWorkSurfacePrimary = isWorkModeMaximized && isOpen && model !== null;
+  const conversationRailWidthPercent = constrainConversationRailWidthPercent(
+    useAtomValue(conversationRailWidthPercentAtom),
+  );
+  const setConversationRailWidthPercent = useSetAtom(
+    conversationRailWidthPercentAtom,
+  );
+  const isSecondaryPanelResizing = useAtomValue(threadSecondaryPanelResizingAtom);
+  // The rail width feeds the layout reassertion below without being one of its
+  // dependencies: re-imposing the persisted width mid-drag would fight the
+  // pointer. Only mode transitions reassert.
+  const conversationRailWidthRef = useRef(conversationRailWidthPercent);
+  useEffect(() => {
+    conversationRailWidthRef.current = conversationRailWidthPercent;
+  }, [conversationRailWidthPercent]);
+
   // A passive effect on purpose: on a pane switch the group applies the
   // freshly mounted panel's defaultSize in react-resizable-panels' own
   // (child) passive effect, and this reassertion must run after it — a layout
@@ -126,6 +164,12 @@ export function SplitWorkspaceSecondaryPanelHost({
     // Both panels register with the group asynchronously on mount; until they
     // have, setLayout throws and defaultSize already encodes this state.
     if (group.getLayout().length !== 2) return;
+    if (isWorkSurfacePrimary) {
+      // Ordered by the panels' `order` props: the work surface comes first.
+      const railWidth = conversationRailWidthRef.current;
+      group.setLayout([MAIN_PANEL_OPEN_SIZE_PERCENT - railWidth, railWidth]);
+      return;
+    }
     if (isPaneMaximized) {
       group.setLayout([MAIN_PANEL_OPEN_SIZE_PERCENT, 0]);
       return;
@@ -146,6 +190,7 @@ export function SplitWorkspaceSecondaryPanelHost({
     focusedPaneId,
     isOpen,
     isPaneMaximized,
+    isWorkSurfacePrimary,
     model?.isMainCollapsed,
     panelWidthPercent,
   ]);
@@ -187,6 +232,17 @@ export function SplitWorkspaceSecondaryPanelHost({
     setIsPanelVisible(false);
   };
 
+  // In Work mode the main panel is the conversation rail, so its drags persist
+  // the rail width the same way the standalone Thread surface does.
+  const handleMainPanelResize = (size: number) => {
+    const nextWidth = resolveConversationRailWidthUpdate({
+      isWorkMode: isWorkSurfacePrimary,
+      isUserResizing: isSecondaryPanelResizing,
+      sizePercent: size,
+    });
+    if (nextWidth !== null) setConversationRailWidthPercent(nextWidth);
+  };
+
   const toggleLabel = isOpen ? "Hide right panel" : "Show right panel";
   // An open pane panel carries the toggle in its own chrome, and a full-screen
   // pane hides it. The empty state has no chrome, so it keeps the button.
@@ -195,8 +251,14 @@ export function SplitWorkspaceSecondaryPanelHost({
   // panel opens, it sits over that panel, so no pane header reserves for it.
   const pinsCornerToggle = showsCornerToggle && !isOpen;
   const hostLayout = useMemo<SecondaryPanelHostLayout>(
-    () => ({ isOpen, isSuppressed: isPaneMaximized, pinsCornerToggle }),
-    [isOpen, isPaneMaximized, pinsCornerToggle],
+    () => ({
+      isOpen,
+      // A Work-mode maximization is the one full-screen state that keeps the
+      // window panel: it is the primary surface.
+      isSuppressed: isPaneMaximized && !isWorkModeMaximized,
+      pinsCornerToggle,
+    }),
+    [isOpen, isPaneMaximized, isWorkModeMaximized, pinsCornerToggle],
   );
 
   return (
@@ -255,19 +317,39 @@ export function SplitWorkspaceSecondaryPanelHost({
         >
           <Panel
             id="split-workspace-main-panel"
-            collapsible
+            // The conversation rail always stays visible; only the ordinary
+            // panel layout collapses the main panel behind a full-width panel.
+            collapsible={!isWorkSurfacePrimary}
             collapsedSize={0}
             defaultSize={
-              isPaneMaximized
-                ? MAIN_PANEL_OPEN_SIZE_PERCENT
-                : model?.isMainCollapsed
-                  ? 0
-                  : isOpen
-                    ? MAIN_PANEL_OPEN_SIZE_PERCENT - panelWidthPercent
-                    : MAIN_PANEL_OPEN_SIZE_PERCENT
+              isWorkSurfacePrimary
+                ? conversationRailWidthPercent
+                : isPaneMaximized
+                  ? MAIN_PANEL_OPEN_SIZE_PERCENT
+                  : model?.isMainCollapsed
+                    ? 0
+                    : isOpen
+                      ? MAIN_PANEL_OPEN_SIZE_PERCENT - panelWidthPercent
+                      : MAIN_PANEL_OPEN_SIZE_PERCENT
             }
-            minSize={MAIN_PANEL_MIN_SIZE_PERCENT}
-            order={1}
+            minSize={
+              isWorkSurfacePrimary
+                ? CONVERSATION_RAIL_MIN_SIZE_PERCENT
+                : MAIN_PANEL_MIN_SIZE_PERCENT
+            }
+            maxSize={
+              isWorkSurfacePrimary
+                ? CONVERSATION_RAIL_MAX_SIZE_PERCENT
+                : MAIN_PANEL_OPEN_SIZE_PERCENT
+            }
+            onResize={handleMainPanelResize}
+            // Work mode swaps which side each panel occupies. The `order` prop
+            // keeps the group's layout array aligned with the visual left-to-
+            // right arrangement, while CSS `order` does the swap — the React
+            // children keep their positions, so the split tree (and every
+            // stateful surface in it) is never reparented.
+            order={isWorkSurfacePrimary ? 2 : 1}
+            style={isWorkSurfacePrimary ? { order: 3 } : undefined}
             className={cn(
               "min-w-0 overflow-clip transition-[flex-grow,flex-basis]",
               PANEL_COLLAPSE_TRANSITION_CLASS,

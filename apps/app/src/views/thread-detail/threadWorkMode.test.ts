@@ -4,6 +4,7 @@ import {
   CONVERSATION_RAIL_MIN_SIZE_PERCENT,
   DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT,
   canEnterThreadWorkMode,
+  canRequestThreadWorkMode,
   constrainConversationRailWidthPercent,
   resolveConversationRailWidthUpdate,
   resolveThreadSurfaceArrangement,
@@ -28,6 +29,7 @@ describe("threadWorkMode", () => {
       canEnterThreadWorkMode({
         hasEligibleWorkSurface: true,
         isCompactViewport: false,
+        isMaximizedPane: false,
         isSecondaryPanelOpen: true,
         isStandaloneLayout: true,
       }),
@@ -36,6 +38,7 @@ describe("threadWorkMode", () => {
       canEnterThreadWorkMode({
         hasEligibleWorkSurface: false,
         isCompactViewport: false,
+        isMaximizedPane: false,
         isSecondaryPanelOpen: true,
         isStandaloneLayout: true,
       }),
@@ -44,6 +47,7 @@ describe("threadWorkMode", () => {
       canEnterThreadWorkMode({
         hasEligibleWorkSurface: true,
         isCompactViewport: false,
+        isMaximizedPane: false,
         isSecondaryPanelOpen: false,
         isStandaloneLayout: true,
       }),
@@ -52,6 +56,7 @@ describe("threadWorkMode", () => {
       canEnterThreadWorkMode({
         hasEligibleWorkSurface: true,
         isCompactViewport: true,
+        isMaximizedPane: false,
         isSecondaryPanelOpen: true,
         isStandaloneLayout: true,
       }),
@@ -60,10 +65,29 @@ describe("threadWorkMode", () => {
       canEnterThreadWorkMode({
         hasEligibleWorkSurface: true,
         isCompactViewport: false,
+        isMaximizedPane: false,
         isSecondaryPanelOpen: true,
         isStandaloneLayout: false,
       }),
     ).toBe(false);
+  });
+
+  it("lets a hosted pane render Work mode only once it holds the workspace", () => {
+    const hostedPane = {
+      hasEligibleWorkSurface: true,
+      isCompactViewport: false,
+      isSecondaryPanelOpen: true,
+      isStandaloneLayout: false,
+    };
+    // The offer comes first: entering Work mode is what maximizes the pane, so
+    // gating the offer on the maximization would make it unreachable.
+    expect(canRequestThreadWorkMode(hostedPane)).toBe(true);
+    expect(
+      canEnterThreadWorkMode({ ...hostedPane, isMaximizedPane: false }),
+    ).toBe(false);
+    expect(
+      canEnterThreadWorkMode({ ...hostedPane, isMaximizedPane: true }),
+    ).toBe(true);
   });
 
   it("keeps independent rail and secondary-panel widths", () => {
