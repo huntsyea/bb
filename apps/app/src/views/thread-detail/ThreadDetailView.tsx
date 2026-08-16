@@ -148,6 +148,7 @@ import {
 import {
   canEnterThreadWorkMode,
   canRequestThreadWorkMode,
+  matchesThreadWorkModeSignal,
   resolveThreadPresentationMode,
   resolveThreadSurfaceArrangement,
 } from "./threadWorkMode";
@@ -1615,7 +1616,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   useEffect(
     () =>
       wsManager.onThreadWorkMode((signal) => {
-        if (signal.threadId !== threadId) {
+        if (!matchesThreadWorkModeSignal(signal, { projectId, threadId })) {
           return;
         }
         const shouldBeWorkMode =
@@ -1648,6 +1649,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
       activeFixedSecondaryTabId,
       fixedPanelTabsState.secondary.tabs,
       isWorkMode,
+      projectId,
       setIsWorkMode,
       threadId,
       workSurfaceRecencyTabIds,

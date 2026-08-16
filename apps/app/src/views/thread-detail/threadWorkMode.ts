@@ -116,3 +116,13 @@ export function resolveConversationRailWidthUpdate(args: {
   }
   return constrainConversationRailWidthPercent(args.sizePercent);
 }
+
+export function matchesThreadWorkModeSignal(
+  signal: { projectId: string; threadId: string },
+  target: { projectId: string; threadId: string },
+): boolean {
+  return (
+    signal.projectId === target.projectId &&
+    signal.threadId === target.threadId
+  );
+}

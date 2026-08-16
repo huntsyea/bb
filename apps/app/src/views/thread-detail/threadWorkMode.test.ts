@@ -6,6 +6,7 @@ import {
   canEnterThreadWorkMode,
   canRequestThreadWorkMode,
   constrainConversationRailWidthPercent,
+  matchesThreadWorkModeSignal,
   resolveConversationRailWidthUpdate,
   resolveThreadSurfaceArrangement,
   resolveThreadWorkModeLayoutSizes,
@@ -175,5 +176,27 @@ describe("threadWorkMode", () => {
         sizePercent: 88,
       }),
     ).toBe(CONVERSATION_RAIL_MAX_SIZE_PERCENT);
+  });
+
+  it("ignores a Work mode signal for a different project or thread", () => {
+    const target = { projectId: "proj_1", threadId: "thr_1" };
+    expect(
+      matchesThreadWorkModeSignal(
+        { projectId: "proj_1", threadId: "thr_1" },
+        target,
+      ),
+    ).toBe(true);
+    expect(
+      matchesThreadWorkModeSignal(
+        { projectId: "proj_2", threadId: "thr_1" },
+        target,
+      ),
+    ).toBe(false);
+    expect(
+      matchesThreadWorkModeSignal(
+        { projectId: "proj_1", threadId: "thr_2" },
+        target,
+      ),
+    ).toBe(false);
   });
 });
