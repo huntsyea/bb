@@ -35,6 +35,7 @@ function renderPanel(args: {
     hasPendingInteraction: boolean;
     isOpen: boolean;
     onToggle: () => void;
+    pendingIndicatorId: string;
   };
   isConversationCollapsed: boolean;
   onToggleConversationCollapse: () => void;
@@ -227,6 +228,7 @@ describe("ThreadSecondaryPanel conversation drawer control", () => {
       hasPendingInteraction: boolean;
       isOpen: boolean;
       onToggle: () => void;
+      pendingIndicatorId: string;
     }> = {},
   ) {
     return renderPanel({
@@ -234,6 +236,7 @@ describe("ThreadSecondaryPanel conversation drawer control", () => {
         hasPendingInteraction: false,
         isOpen: false,
         onToggle: noop,
+        pendingIndicatorId: "thread-conversation-pending-indicator-test-pane",
         ...drawer,
       },
       isConversationCollapsed: false,

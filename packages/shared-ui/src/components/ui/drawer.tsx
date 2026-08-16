@@ -8,6 +8,28 @@ import {
   getOverlayTriggerClassName,
   preventOverlayTriggerSelection,
 } from "./overlay-trigger.js";
+import { useMediaQuery } from "./hooks/use-media-query.js";
+
+export const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+/**
+ * vaul drives the slide and the overlay fade from a stylesheet it injects,
+ * with selectors like `[data-vaul-drawer][data-vaul-snap-points=false]
+ * [data-vaul-drawer-direction=bottom][data-state=open]`. That outweighs any
+ * class we could add here, so `motion-reduce:animate-none` never wins and
+ * vaul ships no reduced-motion handling of its own. `data-vaul-animate="false"`
+ * is vaul's own escape hatch: it declares
+ * `[data-vaul-animate=false]{animation:none!important}`.
+ *
+ * vaul emits its own `data-vaul-animate` before spreading caller props, so
+ * passing the attribute down overrides it.
+ */
+function useSuppressVaulAnimationProps(): {
+  "data-vaul-animate"?: "false";
+} {
+  const prefersReducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
+  return prefersReducedMotion ? { "data-vaul-animate": "false" } : {};
+}
 
 const Drawer = ({
   shouldScaleBackground = false,
@@ -51,6 +73,7 @@ const DrawerOverlay = React.forwardRef<
       className,
     )}
     {...props}
+    {...useSuppressVaulAnimationProps()}
   />
 ));
 DrawerOverlay.displayName = DrawerPrimitive.Overlay.displayName;
@@ -69,6 +92,7 @@ const DrawerContent = React.forwardRef<
         className,
       )}
       {...props}
+      {...useSuppressVaulAnimationProps()}
     >
       <DrawerPrimitive.Handle
         className="mx-auto mt-3 mb-1 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/20"

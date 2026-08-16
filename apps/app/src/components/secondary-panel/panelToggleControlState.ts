@@ -116,11 +116,15 @@ export const CONVERSATION_PENDING_INDICATOR_LABEL =
 
 /**
  * Ties the indicator to the drawer control via `aria-describedby`, so the
- * control itself reports the waiting interaction. Only one compact Work mode
- * drawer control exists on the page at a time, so a constant id is safe.
+ * control itself reports the waiting interaction. Scoped by pane like the Work
+ * mode toggle's id, so the reference stays unambiguous if a layout ever renders
+ * two panes at once.
  */
-export const CONVERSATION_PENDING_INDICATOR_ELEMENT_ID =
-  "thread-conversation-pending-indicator";
+export function resolveConversationPendingIndicatorElementId(
+  paneId: string,
+): string {
+  return `thread-conversation-pending-indicator-${paneId}`;
+}
 
 export interface ResolveWorkModeControlArgs {
   canEnterWorkMode?: boolean;

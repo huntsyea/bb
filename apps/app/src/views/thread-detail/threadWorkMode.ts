@@ -45,9 +45,16 @@ export function toggleThreadPresentationMode(
  * what maximizes it, so gating the offer on the maximization would be circular
  * and the toggle could never be reached.
  *
- * Work mode is offered on every viewport. Compact viewports invert the drawer
- * relationship instead of opting out: the work surface takes the page and the
- * conversation moves into the drawer.
+ * Work mode is available on every viewport. Compact viewports invert the
+ * drawer relationship instead of opting out: the work surface takes the page
+ * and the conversation moves into the drawer.
+ *
+ * There is deliberately no compact-viewport guard here. Work mode is persisted
+ * per thread, so opening a resource on a compact viewport in a thread that
+ * chose Work mode on a wide viewport engages compact Work mode without the
+ * user toggling anything. That is the intended behavior, not an oversight: the
+ * mode did not change, and the layout honors the mode the user already chose.
+ * Do not restore a compact guard here (BB-1 story 12 records the decision).
  */
 export function canRequestThreadWorkMode(args: {
   hasEligibleWorkSurface: boolean;

@@ -43,6 +43,7 @@ import {
 import { useThreads } from "@/hooks/queries/thread-queries";
 import { ThreadTimelinePane } from "./ThreadTimelinePane";
 import { PANEL_COLLAPSE_TRANSITION_CLASS } from "@/components/secondary-panel/panelTransitionTokens";
+import { resolveConversationPendingIndicatorElementId } from "@/components/secondary-panel/panelToggleControlState";
 import { dispatchBrowserViewBoundsSync } from "@/lib/browser-view-bounds-sync";
 import {
   usePaneContext,
@@ -314,8 +315,14 @@ function ThreadDetailSecondaryContentBody({
       hasPendingInteraction,
       isOpen: isConversationDrawerOpen,
       onToggle: toggleConversationDrawer,
+      pendingIndicatorId: resolveConversationPendingIndicatorElementId(paneId),
     }),
-    [hasPendingInteraction, isConversationDrawerOpen, toggleConversationDrawer],
+    [
+      hasPendingInteraction,
+      isConversationDrawerOpen,
+      paneId,
+      toggleConversationDrawer,
+    ],
   );
   // Promotion and restoration move the work surface between the drawer portal
   // and the page, which unmounts whatever held focus. Put focus back on the
@@ -659,7 +666,7 @@ function ThreadDetailSecondaryContentBody({
             if (!open) threadSecondaryPanelProps.onClose();
           }}
           srLabel="Thread details"
-          contentClassName="h-[92dvh] max-h-[92dvh] motion-reduce:animate-none"
+          contentClassName="h-[92dvh] max-h-[92dvh]"
           onContentAnimationEnd={handleDrawerContentAnimationEnd}
           // `handleOnly` keeps vaul from binding its pointerdown handler on
           // the drawer body. Without it, vaul calls setPointerCapture on the
@@ -692,7 +699,7 @@ function ThreadDetailSecondaryContentBody({
             if (!open) closeConversationDrawer();
           }}
           srLabel="Conversation"
-          contentClassName="h-[92dvh] max-h-[92dvh] motion-reduce:animate-none"
+          contentClassName="h-[92dvh] max-h-[92dvh]"
           handleOnly
           repositionInputs={false}
         >

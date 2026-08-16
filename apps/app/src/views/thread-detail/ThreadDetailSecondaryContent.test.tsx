@@ -13,6 +13,7 @@ import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact
 import {
   CONVERSATION_DRAWER_CONTROL_LABEL,
   CONVERSATION_PENDING_INDICATOR_LABEL,
+  resolveConversationPendingIndicatorElementId,
 } from "@/components/secondary-panel/panelToggleControlState";
 import { dispatchBrowserViewBoundsSync } from "@/lib/browser-view-bounds-sync";
 import { ThreadDetailSecondaryContent } from "./ThreadDetailSecondaryContent";
@@ -256,6 +257,9 @@ vi.mock(
               React.createElement(
                 "button",
                 {
+                  "aria-describedby": conversationDrawer.hasPendingInteraction
+                    ? conversationDrawer.pendingIndicatorId
+                    : undefined,
                   "aria-expanded": conversationDrawer.isOpen,
                   "aria-haspopup": "dialog",
                   "aria-label": CONVERSATION_DRAWER_CONTROL_LABEL,
@@ -270,6 +274,7 @@ vi.mock(
                     "span",
                     {
                       "data-testid": "thread-conversation-pending-indicator",
+                      id: conversationDrawer.pendingIndicatorId,
                       role: "status",
                     },
                     CONVERSATION_PENDING_INDICATOR_LABEL,
@@ -1250,6 +1255,16 @@ describe("ThreadDetailSecondaryContent compact Work mode", () => {
     );
     expect(indicator.getAttribute("role")).toBe("status");
     expect(indicator.textContent).toBe(CONVERSATION_PENDING_INDICATOR_LABEL);
+    // The control points at its own pane's indicator, so a second pane in the
+    // same document cannot capture the reference.
+    expect(indicator.id).toBe(
+      resolveConversationPendingIndicatorElementId("main"),
+    );
+    expect(
+      screen
+        .getByTestId("thread-conversation-drawer-toggle")
+        .getAttribute("aria-describedby"),
+    ).toBe(indicator.id);
     // The indicator is the whole response: the drawer never opens on its own.
     expect(drawerShell().getAttribute("data-open")).toBe("false");
 
@@ -1356,12 +1371,13 @@ describe("ThreadDetailSecondaryContent compact Work mode", () => {
     expect(drawerShell().getAttribute("data-open")).toBe("false");
   });
 
-  it("suppresses drawer and conversation animation under reduced motion", () => {
+  // The drawer half of the reduced-motion requirement cannot be asserted here:
+  // this suite mocks the drawer shell, and the suppression lives in vaul's own
+  // markup. It is covered against the real drawer in
+  // `src/components/ui/drawer.reducedMotion.test.tsx`.
+  it("suppresses the conversation collapse transition under reduced motion", () => {
     renderCompactWorkMode();
 
-    expect(drawerShell().getAttribute("data-content-class-name")).toContain(
-      "motion-reduce:animate-none",
-    );
     const conversation = screen
       .getByTestId("thread-timeline-pane")
       .closest('[data-thread-region="conversation"]');

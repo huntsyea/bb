@@ -31,7 +31,6 @@ import {
 import { SECONDARY_PANEL_TOP_CHROME_BACKGROUND_CLASS } from "./panelChromeClasses";
 import {
   CONVERSATION_DRAWER_CONTROL_LABEL,
-  CONVERSATION_PENDING_INDICATOR_ELEMENT_ID,
   CONVERSATION_PENDING_INDICATOR_LABEL,
   resolveConversationCollapseControl,
   resolveWorkModeControl,
@@ -337,6 +336,11 @@ export interface ThreadSecondaryPanelProps {
     hasPendingInteraction: boolean;
     isOpen: boolean;
     onToggle: () => void;
+    /**
+     * DOM id for the pending indicator, scoped by the layout owner's pane so
+     * the control's `aria-describedby` resolves to its own indicator.
+     */
+    pendingIndicatorId: string;
   };
   /**
    * When true, render only the aside content — skip the PanelResizeHandle +
@@ -805,7 +809,7 @@ export function ThreadSecondaryPanel({
                       aria-haspopup="dialog"
                       aria-describedby={
                         conversationDrawer.hasPendingInteraction
-                          ? CONVERSATION_PENDING_INDICATOR_ELEMENT_ID
+                          ? conversationDrawer.pendingIndicatorId
                           : undefined
                       }
                       data-testid="thread-conversation-drawer-toggle"
@@ -820,7 +824,7 @@ export function ThreadSecondaryPanel({
                 {conversationDrawer.hasPendingInteraction ? (
                   <span
                     role="status"
-                    id={CONVERSATION_PENDING_INDICATOR_ELEMENT_ID}
+                    id={conversationDrawer.pendingIndicatorId}
                     className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-primary"
                     data-testid="thread-conversation-pending-indicator"
                   >
