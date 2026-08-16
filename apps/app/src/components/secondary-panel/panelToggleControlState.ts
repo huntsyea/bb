@@ -100,6 +100,28 @@ export function resolveConversationCollapseControl({
   };
 }
 
+/**
+ * Compact Work mode moves the conversation into a drawer. The control's name
+ * stays stable across open and closed — `aria-expanded` carries the state, so
+ * a name that flipped between "Show" and "Hide" would only duplicate it.
+ */
+export const CONVERSATION_DRAWER_CONTROL_LABEL = "Conversation";
+
+/**
+ * Persistent indication that an approval or a question is waiting in the
+ * closed conversation drawer. The drawer never opens on its own.
+ */
+export const CONVERSATION_PENDING_INDICATOR_LABEL =
+  "Conversation needs your response";
+
+/**
+ * Ties the indicator to the drawer control via `aria-describedby`, so the
+ * control itself reports the waiting interaction. Only one compact Work mode
+ * drawer control exists on the page at a time, so a constant id is safe.
+ */
+export const CONVERSATION_PENDING_INDICATOR_ELEMENT_ID =
+  "thread-conversation-pending-indicator";
+
 export interface ResolveWorkModeControlArgs {
   canEnterWorkMode?: boolean;
   isWorkMode: boolean;

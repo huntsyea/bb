@@ -44,17 +44,16 @@ export function toggleThreadPresentationMode(
  * A hosted split pane qualifies before it is maximized: entering Work mode is
  * what maximizes it, so gating the offer on the maximization would be circular
  * and the toggle could never be reached.
+ *
+ * Work mode is offered on every viewport. Compact viewports invert the drawer
+ * relationship instead of opting out: the work surface takes the page and the
+ * conversation moves into the drawer.
  */
 export function canRequestThreadWorkMode(args: {
   hasEligibleWorkSurface: boolean;
-  isCompactViewport: boolean;
   isSecondaryPanelOpen: boolean;
 }): boolean {
-  return (
-    args.isSecondaryPanelOpen &&
-    !args.isCompactViewport &&
-    args.hasEligibleWorkSurface
-  );
+  return args.isSecondaryPanelOpen && args.hasEligibleWorkSurface;
 }
 
 /**
@@ -68,7 +67,6 @@ export function canRequestThreadWorkMode(args: {
  */
 export function canEnterThreadWorkMode(args: {
   hasEligibleWorkSurface: boolean;
-  isCompactViewport: boolean;
   isMaximizedPane: boolean;
   isSecondaryPanelOpen: boolean;
   isStandaloneLayout: boolean;

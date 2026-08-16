@@ -29,7 +29,6 @@ describe("threadWorkMode", () => {
     expect(
       canEnterThreadWorkMode({
         hasEligibleWorkSurface: true,
-        isCompactViewport: false,
         isMaximizedPane: false,
         isSecondaryPanelOpen: true,
         isStandaloneLayout: true,
@@ -38,7 +37,6 @@ describe("threadWorkMode", () => {
     expect(
       canEnterThreadWorkMode({
         hasEligibleWorkSurface: false,
-        isCompactViewport: false,
         isMaximizedPane: false,
         isSecondaryPanelOpen: true,
         isStandaloneLayout: true,
@@ -47,7 +45,6 @@ describe("threadWorkMode", () => {
     expect(
       canEnterThreadWorkMode({
         hasEligibleWorkSurface: true,
-        isCompactViewport: false,
         isMaximizedPane: false,
         isSecondaryPanelOpen: false,
         isStandaloneLayout: true,
@@ -56,16 +53,6 @@ describe("threadWorkMode", () => {
     expect(
       canEnterThreadWorkMode({
         hasEligibleWorkSurface: true,
-        isCompactViewport: true,
-        isMaximizedPane: false,
-        isSecondaryPanelOpen: true,
-        isStandaloneLayout: true,
-      }),
-    ).toBe(false);
-    expect(
-      canEnterThreadWorkMode({
-        hasEligibleWorkSurface: true,
-        isCompactViewport: false,
         isMaximizedPane: false,
         isSecondaryPanelOpen: true,
         isStandaloneLayout: false,
@@ -76,7 +63,6 @@ describe("threadWorkMode", () => {
   it("lets a hosted pane render Work mode only once it holds the workspace", () => {
     const hostedPane = {
       hasEligibleWorkSurface: true,
-      isCompactViewport: false,
       isSecondaryPanelOpen: true,
       isStandaloneLayout: false,
     };

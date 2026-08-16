@@ -30,6 +30,9 @@ import {
 } from "./panelTransitionTokens";
 import { SECONDARY_PANEL_TOP_CHROME_BACKGROUND_CLASS } from "./panelChromeClasses";
 import {
+  CONVERSATION_DRAWER_CONTROL_LABEL,
+  CONVERSATION_PENDING_INDICATOR_ELEMENT_ID,
+  CONVERSATION_PENDING_INDICATOR_LABEL,
   resolveConversationCollapseControl,
   resolveWorkModeControl,
 } from "./panelToggleControlState";
@@ -320,11 +323,34 @@ export interface ThreadSecondaryPanelProps {
   canEnterWorkMode?: boolean;
   onToggleWorkMode?: () => void;
   /**
+   * Stable DOM id for the enter/restore Work mode control. Promotion and
+   * restoration remount that control across the page/drawer boundary, so the
+   * layout owner needs a portal-proof handle to return focus to it.
+   */
+  workModeToggleId?: string;
+  /**
+   * Compact Work mode only: the conversation now lives in a drawer this panel
+   * opens. Omitted on every other layout, where the conversation is on the
+   * page and needs no control.
+   */
+  conversationDrawer?: {
+    hasPendingInteraction: boolean;
+    isOpen: boolean;
+    onToggle: () => void;
+  };
+  /**
    * When true, render only the aside content — skip the PanelResizeHandle +
    * Panel wrappers that are only meaningful inside a desktop PanelGroup.
    * Caller is responsible for wrapping the content in a Drawer in that case.
    */
   renderAsDrawer: boolean;
+  /**
+   * Compact Work mode: the panel is the page, not a drawer and not a resizable
+   * pane. Drops the handle/Panel wrappers (there is nothing to resize against)
+   * while keeping every drawer-specific style off, so the aside fills its
+   * flex parent directly.
+   */
+  withoutResizablePanel?: boolean;
 }
 
 function resolveActiveFixedPanel({
@@ -389,7 +415,10 @@ export function ThreadSecondaryPanel({
   isWorkMode = false,
   canEnterWorkMode = true,
   onToggleWorkMode,
+  workModeToggleId,
+  conversationDrawer,
   renderAsDrawer,
+  withoutResizablePanel = false,
 }: ThreadSecondaryPanelProps) {
   const newTabShortcut = useAppCommandShortcut("panel.newTab");
   const togglePanelShortcut = useAppCommandShortcut("panel.toggle");
@@ -403,15 +432,19 @@ export function ThreadSecondaryPanel({
   const hideControl = resolveSecondaryPanelHideControl({
     isPrimaryWorkSurface,
   });
-  const conversationCollapseControl =
-    renderAsDrawer || !showConversationCollapseControl
-      ? null
-      : onToggleWorkMode
-        ? resolveWorkModeControl({
-            canEnterWorkMode,
-            isWorkMode,
-            onToggleWorkMode,
-          })
+  // The Work mode control also belongs in the compact drawer: that drawer is
+  // where the work surface lives before it is promoted to the page. The
+  // resource-only full-screen control stays wide-layout-only.
+  const conversationCollapseControl = !showConversationCollapseControl
+    ? null
+    : onToggleWorkMode
+      ? resolveWorkModeControl({
+          canEnterWorkMode,
+          isWorkMode,
+          onToggleWorkMode,
+        })
+      : renderAsDrawer
+        ? null
         : resolveConversationCollapseControl({
             isConversationCollapsed,
             onToggleConversationCollapse,
@@ -752,6 +785,52 @@ export function ThreadSecondaryPanel({
             ) : null}
           </div>
           <div className="flex min-w-0 shrink-0 items-center gap-1">
+            {conversationDrawer ? (
+              <div className="relative shrink-0">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        HEADER_PANE_ACTION_ICON_BUTTON_CLASS,
+                        CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS,
+                        "shrink-0",
+                        usesDesktopChrome && MACOS_WINDOW_NO_DRAG_CLASS,
+                      )}
+                      onClick={conversationDrawer.onToggle}
+                      aria-label={CONVERSATION_DRAWER_CONTROL_LABEL}
+                      aria-expanded={conversationDrawer.isOpen}
+                      aria-haspopup="dialog"
+                      aria-describedby={
+                        conversationDrawer.hasPendingInteraction
+                          ? CONVERSATION_PENDING_INDICATOR_ELEMENT_ID
+                          : undefined
+                      }
+                      data-testid="thread-conversation-drawer-toggle"
+                    >
+                      <Icon name="MessageSquare" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {CONVERSATION_DRAWER_CONTROL_LABEL}
+                  </TooltipContent>
+                </Tooltip>
+                {conversationDrawer.hasPendingInteraction ? (
+                  <span
+                    role="status"
+                    id={CONVERSATION_PENDING_INDICATOR_ELEMENT_ID}
+                    className="pointer-events-none absolute right-1 top-1 size-2 rounded-full bg-primary"
+                    data-testid="thread-conversation-pending-indicator"
+                  >
+                    <span className="sr-only">
+                      {CONVERSATION_PENDING_INDICATOR_LABEL}
+                    </span>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             {conversationCollapseControl ? (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -759,6 +838,7 @@ export function ThreadSecondaryPanel({
                     type="button"
                     variant="ghost"
                     size="icon"
+                    id={workModeToggleId}
                     className={cn(
                       HEADER_PANE_ACTION_ICON_BUTTON_CLASS,
                       CHROME_SUBTLE_ICON_BUTTON_FOREGROUND_CLASS,
@@ -884,7 +964,7 @@ export function ThreadSecondaryPanel({
     </aside>
   );
 
-  if (renderAsDrawer) {
+  if (renderAsDrawer || withoutResizablePanel) {
     return asideMarkup;
   }
 

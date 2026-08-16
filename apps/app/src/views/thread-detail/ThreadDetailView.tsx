@@ -1398,12 +1398,10 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   );
   const canRequestWorkMode = canRequestThreadWorkMode({
     hasEligibleWorkSurface: hasEligibleSurface,
-    isCompactViewport: renderSecondaryPanelAsDrawer,
     isSecondaryPanelOpen,
   });
   const canEnterWorkMode = canEnterThreadWorkMode({
     hasEligibleWorkSurface: hasEligibleSurface,
-    isCompactViewport: renderSecondaryPanelAsDrawer,
     isMaximizedPane: isMaximized,
     isSecondaryPanelOpen,
     isStandaloneLayout,
@@ -1423,9 +1421,10 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   });
   // A hosted pane in Work mode needs the whole workspace, so it claims a
   // Work-mode-owned maximization of its own pane and releases it on every exit
-  // (mode off, panel closed, viewport compact, work surface gone, focus moved
-  // to a sibling pane). The claim is a no-op when the user already maximized
-  // this pane, so that maximization survives leaving Work mode.
+  // (mode off, panel closed, work surface gone, focus moved to a sibling pane).
+  // The claim is a no-op when the user already maximized this pane, so that
+  // maximization survives leaving Work mode. A compact viewport is not an exit:
+  // compact inverts the drawer rather than opting out of Work mode.
   const wantsPaneMaximizedForWorkMode =
     isWorkMode && isFocused && !isStandaloneLayout && canRequestWorkMode;
   useEffect(() => {
@@ -3062,6 +3061,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
           isSecondaryPanelOpen={isSecondaryPanelOpen}
           isConversationCollapsed={isConversationCollapsed}
           isWorkMode={isWorkModeActive}
+          hasPendingInteraction={hasPendingInteraction}
           isBoundedPane={isBoundedPane}
           onToggleSecondaryPanel={handleToggleSecondaryPanel}
           onToggleConversationCollapse={toggleConversationCollapse}
