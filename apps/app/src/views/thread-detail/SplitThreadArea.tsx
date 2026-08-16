@@ -96,6 +96,7 @@ import {
   createSinglePaneLayout,
   focusedPaneRoute,
   paneContentRoute,
+  paneReplacedByContent,
   reconcileLayoutForContent,
   threadPaneContent,
 } from "./splitThreadNavigation";
@@ -107,6 +108,7 @@ import {
 } from "@/lib/bb-desktop";
 import { SplitWorkspaceSecondaryPanelHost } from "./SplitWorkspaceSecondaryPanelHost";
 import { SecondaryPanelHostLayoutContext } from "@/components/secondary-panel/SecondaryPanelHostLayoutContext";
+import { getThreadWorkModeAtom } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
 import {
   CONTEXT_INACTIVE_TEXT_CLASS,
   CONTEXT_SELECTION_SURFACE_CLASS,
@@ -251,18 +253,6 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     [routeContent, routeThread],
   );
 
-  // Fold external navigation (initial load, sidebar click, deep link) into the
-  // layout. The reconcile is idempotent, so a URL that already matches the
-  // focused pane is a no-op — no history spam, no render loop.
-  useEffect(() => {
-    if (!threadSplitsEnabled || currentContent === null) {
-      return;
-    }
-    setLayout((previous) =>
-      reconcileLayoutForContent(previous, currentContent),
-    );
-  }, [currentContent, setLayout, threadSplitsEnabled]);
-
   // Effective layout for render/handlers before the effect seeds the atom.
   const layout: SplitLayout | null =
     storedLayout ??
@@ -368,6 +358,37 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     },
     [setMaximizedPaneId, setPaneWorkModeMaximized, store],
   );
+
+  // Fold external navigation (initial load, sidebar click, deep link) into the
+  // layout. The reconcile is idempotent, so a URL that already matches the
+  // focused pane is a no-op — no history spam, no render loop.
+  //
+  // External navigation swaps pane content without changing focus, so neither
+  // navigateInPane nor the focus-carry effect covers it. A Work-mode-owned
+  // maximization is released here, before the swap, so the destination Thread
+  // mounts into a restored split instead of inheriting a hidden workspace it
+  // never asked for.
+  useEffect(() => {
+    if (!threadSplitsEnabled || currentContent === null) {
+      return;
+    }
+    const owner = store.get(workModeMaximizedPaneIdAtom);
+    if (
+      owner !== null &&
+      paneReplacedByContent(store.get(splitLayoutAtom), currentContent) === owner
+    ) {
+      setPaneWorkModeMaximized(owner, false);
+    }
+    setLayout((previous) =>
+      reconcileLayoutForContent(previous, currentContent),
+    );
+  }, [
+    currentContent,
+    setLayout,
+    setPaneWorkModeMaximized,
+    store,
+    threadSplitsEnabled,
+  ]);
 
   // CLI/SDK pane actions arrive as ephemeral server broadcasts. This split
   // owner applies them so agent-driven transitions share the local control's
@@ -506,6 +527,18 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
         store.set(splitLayoutAtom, next);
         const route = focusedPaneRoute(next);
         if (route !== null) navigate(route, { replace: true });
+      }
+      // Restoring the split under Work mode takes away the workspace Work mode
+      // needs, so Work mode turns off with it. Leaving the persisted mode on
+      // would render the Thread as conversation while its control reads "on",
+      // and the next click on that control would turn Work mode off again
+      // instead of entering it.
+      if (
+        store.get(maximizedPaneIdAtom) === paneId &&
+        store.get(workModeMaximizedPaneIdAtom) === paneId &&
+        pane.content.kind === "thread"
+      ) {
+        store.set(getThreadWorkModeAtom(pane.content.threadId), false);
       }
       setMaximizedPaneId((previous) => (previous === paneId ? null : paneId));
     },

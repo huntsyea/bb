@@ -8,7 +8,12 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { createStore, Provider as JotaiProvider } from "jotai";
+import {
+  createStore,
+  Provider as JotaiProvider,
+  useAtom,
+  useAtomValue,
+} from "jotai";
 import {
   useContext,
   useEffect,
@@ -47,6 +52,7 @@ import {
   usePluginComposerHost,
   type PluginComposerHost,
 } from "@/components/plugin/plugin-composer-host";
+import { getThreadWorkModeAtom } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
 import { PaneContext, usePaneSecondaryPanelRegistration } from "./PaneContext";
 import { SplitThreadArea } from "./SplitThreadArea";
 import { applyThreadOpenToLayout } from "./splitThreadNavigation";
@@ -277,7 +283,9 @@ vi.mock("./ThreadDetailView", () => ({
     // whole workspace while it is in Work mode and focused, and releases on
     // every exit. The view's own eligibility gates are exercised in
     // threadWorkMode.test.ts; this fixture drives the split-workspace seam.
-    const [isWorkMode, setIsWorkMode] = useState(false);
+    const [isWorkMode, setIsWorkMode] = useAtom(
+      getThreadWorkModeAtom(threadId),
+    );
     const setWorkModeMaximized = pane?.setWorkModeMaximized ?? null;
     const wantsWorkModeMaximized = isWorkMode && (pane?.isFocused ?? false);
     useEffect(() => {
@@ -341,7 +349,7 @@ vi.mock("./ThreadDetailView", () => ({
           <button
             type="button"
             data-testid={`work-mode-${threadId}`}
-            onClick={() => setIsWorkMode((active) => !active)}
+            onClick={() => setIsWorkMode((active: boolean) => !active)}
           >
             {isWorkMode ? "leave work mode" : "enter work mode"}
           </button>
@@ -526,6 +534,34 @@ function threadPath(threadId: string): string {
   return `/threads/${threadId}`;
 }
 
+interface WorkspaceCommit {
+  threadIds: string[];
+  maximizedPaneId: string | null;
+}
+
+/**
+ * Records the workspace after every commit, so a test can assert *when* the
+ * split came back relative to the content swap — not just that it did.
+ */
+function WorkspaceCommitProbe({ commits }: { commits: WorkspaceCommit[] }) {
+  const layout = useAtomValue(splitLayoutAtom);
+  const maximizedPaneId = useAtomValue(maximizedPaneIdAtom);
+  useEffect(() => {
+    commits.push({
+      threadIds:
+        layout === null
+          ? []
+          : listPanes(layout.root).map((pane) =>
+              pane.content.kind === "thread"
+                ? pane.content.threadId
+                : pane.content.kind,
+            ),
+      maximizedPaneId,
+    });
+  });
+  return null;
+}
+
 function LocationProbe() {
   const location = useLocation();
   return <div data-testid="location">{location.pathname}</div>;
@@ -562,6 +598,7 @@ function renderSplitArea(options: {
   routeContent?: PaneContent;
   routeAwareContent?: boolean;
   maximizedPaneId?: string;
+  commits?: WorkspaceCommit[];
 }) {
   const store = createStore();
   if (options.layout !== undefined) {
@@ -581,6 +618,9 @@ function renderSplitArea(options: {
               <SplitThreadArea routeContent={options.routeContent} />
             )}
             <LocationProbe />
+            {options.commits !== undefined ? (
+              <WorkspaceCommitProbe commits={options.commits} />
+            ) : null}
             {options.externalTo !== undefined ? (
               <ExternalNav to={options.externalTo} />
             ) : null}
@@ -817,6 +857,115 @@ describe("SplitThreadArea", () => {
     // The source Thread's work surface never follows the pane: the window
     // panel now belongs to the destination Thread alone.
     expect(screen.queryByTestId("hosted-panel-thr-a")).toBeNull();
+  });
+
+  it("restores the hidden split before an external route change mounts another thread", async () => {
+    const initialLayout = twoPaneLayout("pane-1");
+    const commits: WorkspaceCommit[] = [];
+    const store = renderSplitArea({
+      path: threadPath("thr-a"),
+      layout: initialLayout,
+      externalTo: threadPath("thr-c"),
+      commits,
+    });
+
+    fireEvent.click(await screen.findByTestId("work-mode-thr-a"));
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBe("pane-1");
+
+    // A sidebar click swaps the focused pane's content without moving focus,
+    // so neither navigateInPane nor the focus-carry path covers it.
+    fireEvent.click(screen.getByTestId("external-nav"));
+    await screen.findByTestId("pane-thr-c");
+
+    // The split is back in the very commit that first shows thr-c, not one
+    // commit later: the destination never sees the workspace thr-a held.
+    expect(
+      commits.find((commit) => commit.threadIds.includes("thr-c"))
+        ?.maximizedPaneId,
+    ).toBeNull();
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBeNull();
+    expect(store.get(maximizedPaneIdAtom)).toBeNull();
+    const paneB = document.querySelector<HTMLElement>(
+      '[data-split-pane-id="pane-2"]',
+    );
+    expect(paneB?.getAttribute("aria-hidden")).toBeNull();
+    expect(screen.queryByTestId("hosted-panel-thr-a")).toBeNull();
+    expect(
+      listPanes(store.get(splitLayoutAtom)?.root ?? initialLayout.root),
+    ).toHaveLength(2);
+  });
+
+  it("does not hand a Work-mode-owned maximization to a destination thread already in Work mode", async () => {
+    const initialLayout = twoPaneLayout("pane-1");
+    const commits: WorkspaceCommit[] = [];
+    const store = createStore();
+    store.set(splitLayoutAtom, initialLayout);
+    // thr-c restores its own persisted Work mode as it mounts, which must not
+    // let it adopt the maximization thr-a owned a commit earlier.
+    store.set(getThreadWorkModeAtom("thr-c"), true);
+    render(
+      <TooltipProvider>
+        <JotaiProvider store={store}>
+          <QueryClientProvider client={queryClient}>
+            <MemoryRouter initialEntries={[threadPath("thr-a")]}>
+              <SplitThreadArea />
+              <LocationProbe />
+              <WorkspaceCommitProbe commits={commits} />
+              <ExternalNav to={threadPath("thr-c")} />
+            </MemoryRouter>
+          </QueryClientProvider>
+        </JotaiProvider>
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(await screen.findByTestId("work-mode-thr-a"));
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBe("pane-1");
+
+    fireEvent.click(screen.getByTestId("external-nav"));
+    await screen.findByTestId("pane-thr-c");
+
+    // thr-c mounts into a restored split. It may then claim the workspace on
+    // its own behalf, but it never silently inherits thr-a's claim.
+    expect(
+      commits.find((commit) => commit.threadIds.includes("thr-c"))
+        ?.maximizedPaneId,
+    ).toBeNull();
+    expect(screen.queryByTestId("hosted-panel-thr-a")).toBeNull();
+    expect(store.get(splitLayoutAtom)?.root).toEqual({
+      ...initialLayout.root,
+      children: [
+        { type: "pane", paneId: "pane-1", content: threadContent("thr-c") },
+        { type: "pane", paneId: "pane-2", content: threadContent("thr-b") },
+      ],
+    });
+  });
+
+  it("turns Work mode off when the user restores the split it was using", async () => {
+    const initialLayout = twoPaneLayout("pane-1");
+    const store = renderSplitArea({
+      path: threadPath("thr-a"),
+      layout: initialLayout,
+    });
+
+    fireEvent.click(await screen.findByTestId("work-mode-thr-a"));
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBe("pane-1");
+
+    fireEvent.click(screen.getByTestId("maximize-thr-a"));
+
+    // Rendered and persisted mode stay in step: the control reads "enter"
+    // again, so the next click enters Work mode rather than leaving it.
+    await waitFor(() => {
+      expect(screen.getByTestId("work-mode-thr-a").textContent).toBe(
+        "enter work mode",
+      );
+    });
+    expect(store.get(getThreadWorkModeAtom("thr-a"))).toBe(false);
+    expect(store.get(maximizedPaneIdAtom)).toBeNull();
+    expect(store.get(workModeMaximizedPaneIdAtom)).toBeNull();
+    const paneB = document.querySelector<HTMLElement>(
+      '[data-split-pane-id="pane-2"]',
+    );
+    expect(paneB?.getAttribute("aria-hidden")).toBeNull();
   });
 
   it("keeps each Thread's work surface with its own pane when focus moves", async () => {
