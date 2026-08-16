@@ -11,9 +11,10 @@ import {
   DEFAULT_THREAD_PRESENTATION_STATE,
   getThreadPresentationStateStorageKey,
   parseConversationRailWidthPercent,
+  parseThreadPresentationState,
   serializeThreadPresentationState,
   threadIdFromPresentationStorageKey,
-  resolveStoredThreadPresentationState,
+  readThreadPresentationStateFromStorage,
   type ThreadPresentationState,
 } from "@/views/thread-detail/threadPresentationState";
 
@@ -146,11 +147,19 @@ const threadPresentationStateStorage: SyncStorage<ThreadPresentationState> = {
       return initialValue;
     }
     const threadId = threadIdFromPresentationStorageKey(key);
-    return resolveStoredThreadPresentationState({
-      storedValue: window.localStorage.getItem(key),
+    const storedValue = window.localStorage.getItem(key);
+    const resolved = readThreadPresentationStateFromStorage({
+      storedValue,
       legacyCollapsedStoredValue:
         threadId === null ? null : readLegacyCollapsedStoredValue(threadId),
     });
+    if (resolved.persistMigratedValue) {
+      window.localStorage.setItem(
+        key,
+        serializeThreadPresentationState(resolved.state),
+      );
+    }
+    return resolved.state;
   },
   setItem: (key, value) => {
     if (typeof window === "undefined") {
@@ -172,13 +181,9 @@ const threadPresentationStateStorage: SyncStorage<ThreadPresentationState> = {
       if (event.storageArea !== window.localStorage || event.key !== key) {
         return;
       }
-      const threadId = threadIdFromPresentationStorageKey(key);
       callback(
-        resolveStoredThreadPresentationState({
-          storedValue: event.newValue,
-          legacyCollapsedStoredValue:
-            threadId === null ? null : readLegacyCollapsedStoredValue(threadId),
-        }),
+        parseThreadPresentationState(event.newValue) ??
+          DEFAULT_THREAD_PRESENTATION_STATE,
       );
     };
     window.addEventListener("storage", handleStorage);
@@ -215,24 +220,15 @@ export function getThreadPresentationStateAtom(
     : disabledThreadPresentationStateAtom;
 }
 
-function resolvePresentationUpdate<T>(
-  update: T | ((current: T) => T),
-  current: T,
-): T {
-  return typeof update === "function"
-    ? (update as (current: T) => T)(current)
-    : update;
-}
-
 const threadWorkModeAtomFamily = atomFamily(
   (threadId: ResolvedThreadSecondaryPanelThreadId) =>
     atom(
       (get) => get(threadPresentationStateAtomFamily(threadId)).mode === "work",
-      (get, set, update: boolean | ((current: boolean) => boolean)) => {
+      (get, set, update: (current: boolean) => boolean) => {
         const presentationAtom = threadPresentationStateAtomFamily(threadId);
         const current = get(presentationAtom);
         const isWorkMode = current.mode === "work";
-        const next = resolvePresentationUpdate(update, isWorkMode);
+        const next = update(isWorkMode);
         if (next === isWorkMode) {
           return;
         }
@@ -263,10 +259,10 @@ const threadWorkSurfaceRecencyAtomFamily = atomFamily(
   (threadId: ResolvedThreadSecondaryPanelThreadId) =>
     atom(
       (get) => get(threadPresentationStateAtomFamily(threadId)).recencyTabIds,
-      (get, set, update: string[] | ((current: string[]) => string[])) => {
+      (get, set, update: (current: string[]) => string[]) => {
         const presentationAtom = threadPresentationStateAtomFamily(threadId);
         const current = get(presentationAtom);
-        const next = resolvePresentationUpdate(update, current.recencyTabIds);
+        const next = update(current.recencyTabIds);
         if (next === current.recencyTabIds) {
           return;
         }

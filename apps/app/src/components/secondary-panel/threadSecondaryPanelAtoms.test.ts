@@ -40,13 +40,13 @@ function hydrate<T>(read: (store: ReturnType<typeof createStore>) => T): T {
 describe("thread presentation persistence", () => {
   it("reloads mode and the last eligible surface for only that Thread", () => {
     const store = createStore();
-    store.set(getThreadWorkModeAtom("thr-a"), true);
-    store.set(getThreadWorkSurfaceRecencyAtom("thr-a"), [
+    store.set(getThreadWorkModeAtom("thr-a"), () => true);
+    store.set(getThreadWorkSurfaceRecencyAtom("thr-a"), () => [
       "tab-docs",
       "tab-file",
     ]);
-    store.set(getThreadWorkModeAtom("thr-b"), false);
-    store.set(getThreadWorkSurfaceRecencyAtom("thr-b"), ["tab-other"]);
+    store.set(getThreadWorkModeAtom("thr-b"), () => false);
+    store.set(getThreadWorkSurfaceRecencyAtom("thr-b"), () => ["tab-other"]);
 
     expect(
       parseThreadPresentationState(
@@ -106,13 +106,38 @@ describe("thread presentation persistence", () => {
       hydrate((store) => store.get(getThreadWorkModeAtom("thr-legacy"))),
     ).toBe(true);
     expect(
+      parseThreadPresentationState(
+        window.localStorage.getItem(
+          getThreadPresentationStateStorageKey({ threadId: "thr-legacy" }),
+        ),
+      ),
+    ).toEqual({
+      ...DEFAULT_THREAD_PRESENTATION_STATE,
+      mode: "work",
+    });
+    expect(
       hydrate((store) => store.get(getThreadWorkModeAtom("thr-other"))),
     ).toBe(false);
+    expect(
+      parseThreadPresentationState(
+        window.localStorage.getItem(
+          getThreadPresentationStateStorageKey({ threadId: "thr-other" }),
+        ),
+      ),
+    ).toEqual(DEFAULT_THREAD_PRESENTATION_STATE);
     expect(
       hydrate((store) =>
         store.get(getThreadPresentationStateAtom("thr-missing")),
       ),
     ).toEqual(DEFAULT_THREAD_PRESENTATION_STATE);
+
+    window.localStorage.setItem(
+      getThreadConversationCollapsedStorageKey({ threadId: "thr-other" }),
+      "true",
+    );
+    expect(
+      hydrate((store) => store.get(getThreadWorkModeAtom("thr-other"))),
+    ).toBe(false);
   });
 
   it("does not let a stored presentation leak into another Thread on switch", () => {

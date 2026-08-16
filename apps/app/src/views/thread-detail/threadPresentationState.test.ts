@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+
+import { afterEach, describe, expect, it } from "vitest";
 import {
   createGitDiffFixedPanelTab,
   createNewTabFixedPanelTab,
@@ -11,16 +13,26 @@ import {
   THREAD_PRESENTATION_STATE_VERSION,
   areThreadPresentationStatesEqual,
   getThreadPresentationStateStorageKey,
+  haveThreadTabsHydrated,
   migrateLegacyCollapsedPresentationState,
   parseConversationRailWidthPercent,
   parseThreadPresentationState,
+  pruneThreadPresentationStateStorage,
+  readThreadPresentationStateFromStorage,
   resolveStoredThreadPresentationState,
+  resolveThreadPresentationRestore,
   restoreThreadPresentationState,
   serializeThreadPresentationState,
   threadIdFromPresentationStorageKey,
   type ThreadPresentationState,
 } from "./threadPresentationState";
 import { DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT } from "./threadWorkMode";
+import {
+  FIXED_PANEL_TABS_IDLE_EXPIRY_MS,
+  createEmptyFixedPanelTabsState,
+  getFixedPanelTabsStateStorageKey,
+  serializeFixedPanelTabsState,
+} from "@/lib/fixed-panel-tabs-state";
 
 function workspaceFile(path: string): FixedPanelTab {
   return createWorkspaceFilePreviewFixedPanelTab({
@@ -43,6 +55,10 @@ function presentation(
     ...overrides,
   };
 }
+
+afterEach(() => {
+  window.localStorage.clear();
+});
 
 describe("threadPresentationState", () => {
   it("stores mode and the active eligible surface per Thread", () => {
@@ -240,6 +256,154 @@ describe("threadPresentationState", () => {
     });
   });
 
+  it("nulls a conversation active surface that is no longer among the tabs", () => {
+    const fileA = workspaceFile("a.ts");
+    const fileB = workspaceFile("b.ts");
+
+    expect(
+      restoreThreadPresentationState({
+        state: presentation({
+          mode: "conversation",
+          activeEligibleTabId: fileB.id,
+          recencyTabIds: [fileB.id, fileA.id],
+        }),
+        tabs: [fileA],
+      }),
+    ).toEqual({
+      activateTabId: null,
+      state: presentation({
+        recencyTabIds: [fileA.id],
+        activeEligibleTabId: null,
+      }),
+    });
+  });
+
+  it("does not persist a conversation fallback until tabs have hydrated", () => {
+    const fileA = workspaceFile("a.ts");
+    const storedWork = presentation({
+      mode: "work",
+      activeEligibleTabId: fileA.id,
+      recencyTabIds: [fileA.id],
+    });
+
+    expect(
+      resolveThreadPresentationRestore({
+        canEnterWorkMode: false,
+        state: storedWork,
+        tabs: [],
+        tabsHydrated: false,
+      }),
+    ).toEqual({ kind: "wait" });
+    expect(
+      haveThreadTabsHydrated({
+        hasQueryError: false,
+        hasSettledQuery: false,
+        isLocalOnlyRevision: false,
+        localMatchesRemote: false,
+        localTabCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not activate a restored Work surface when Work mode cannot be entered", () => {
+    const fileA = workspaceFile("a.ts");
+    const storedWork = presentation({
+      mode: "work",
+      activeEligibleTabId: fileA.id,
+      recencyTabIds: [fileA.id],
+    });
+
+    expect(
+      resolveThreadPresentationRestore({
+        canEnterWorkMode: false,
+        state: storedWork,
+        tabs: [fileA],
+        tabsHydrated: true,
+      }),
+    ).toEqual({
+      activateTabId: null,
+      kind: "apply",
+      state: storedWork,
+    });
+    expect(
+      resolveThreadPresentationRestore({
+        canEnterWorkMode: true,
+        state: storedWork,
+        tabs: [fileA],
+        tabsHydrated: true,
+      }),
+    ).toEqual({
+      activateTabId: fileA.id,
+      kind: "apply",
+      state: storedWork,
+    });
+  });
+
+  it("persists a conversation fallback only after a hydrated empty tab list", () => {
+    const fileA = workspaceFile("a.ts");
+
+    expect(
+      resolveThreadPresentationRestore({
+        canEnterWorkMode: false,
+        state: presentation({
+          mode: "work",
+          activeEligibleTabId: fileA.id,
+          recencyTabIds: [fileA.id],
+        }),
+        tabs: [],
+        tabsHydrated: true,
+      }),
+    ).toEqual({
+      activateTabId: null,
+      kind: "apply",
+      state: DEFAULT_THREAD_PRESENTATION_STATE,
+    });
+  });
+
+  it("treats a settled local-only tab revision as hydrated", () => {
+    expect(
+      haveThreadTabsHydrated({
+        hasQueryError: false,
+        hasSettledQuery: true,
+        isLocalOnlyRevision: true,
+        localMatchesRemote: false,
+        localTabCount: 2,
+      }),
+    ).toBe(true);
+    expect(
+      haveThreadTabsHydrated({
+        hasQueryError: false,
+        hasSettledQuery: true,
+        isLocalOnlyRevision: false,
+        localMatchesRemote: false,
+        localTabCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("writes a migrated presentation once so later collapsed values cannot re-seed Work mode", () => {
+    expect(
+      readThreadPresentationStateFromStorage({
+        storedValue: null,
+        legacyCollapsedStoredValue: "true",
+      }),
+    ).toEqual({
+      persistMigratedValue: true,
+      state: presentation({ mode: "work" }),
+    });
+    expect(
+      readThreadPresentationStateFromStorage({
+        storedValue: serializeThreadPresentationState(
+          presentation({ mode: "conversation" }),
+        ),
+        legacyCollapsedStoredValue: "true",
+      }),
+    ).toEqual({
+      persistMigratedValue: false,
+      state: presentation({ mode: "conversation" }),
+    });
+  });
+
   it("accepts a stored rail width and rejects invalid values", () => {
     expect(parseConversationRailWidthPercent("42")).toBe(42);
     expect(
@@ -257,5 +421,56 @@ describe("threadPresentationState", () => {
     expect(parseConversationRailWidthPercent("101")).toBe(
       DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT,
     );
+  });
+
+  it("prunes presentation keys whose tab storage is missing or expired", () => {
+    const now = 1_700_000_000_000;
+    const liveThreadId = "thr-live";
+    const expiredThreadId = "thr-expired";
+    const orphanThreadId = "thr-orphan";
+    window.localStorage.setItem(
+      getThreadPresentationStateStorageKey({ threadId: liveThreadId }),
+      serializeThreadPresentationState(presentation({ mode: "work" })),
+    );
+    window.localStorage.setItem(
+      getFixedPanelTabsStateStorageKey({ threadId: liveThreadId }),
+      serializeFixedPanelTabsState({
+        state: createEmptyFixedPanelTabsState({ lastUsedAt: now }),
+      }),
+    );
+    window.localStorage.setItem(
+      getThreadPresentationStateStorageKey({ threadId: expiredThreadId }),
+      serializeThreadPresentationState(presentation({ mode: "work" })),
+    );
+    window.localStorage.setItem(
+      getFixedPanelTabsStateStorageKey({ threadId: expiredThreadId }),
+      serializeFixedPanelTabsState({
+        state: createEmptyFixedPanelTabsState({
+          lastUsedAt: now - FIXED_PANEL_TABS_IDLE_EXPIRY_MS - 1,
+        }),
+      }),
+    );
+    window.localStorage.setItem(
+      getThreadPresentationStateStorageKey({ threadId: orphanThreadId }),
+      serializeThreadPresentationState(presentation({ mode: "work" })),
+    );
+
+    pruneThreadPresentationStateStorage({ now });
+
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationStateStorageKey({ threadId: liveThreadId }),
+      ),
+    ).not.toBeNull();
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationStateStorageKey({ threadId: expiredThreadId }),
+      ),
+    ).toBeNull();
+    expect(
+      window.localStorage.getItem(
+        getThreadPresentationStateStorageKey({ threadId: orphanThreadId }),
+      ),
+    ).toBeNull();
   });
 });

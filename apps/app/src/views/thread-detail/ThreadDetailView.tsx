@@ -152,7 +152,8 @@ import {
 } from "./threadWorkMode";
 import {
   areThreadPresentationStatesEqual,
-  restoreThreadPresentationState,
+  haveThreadTabsHydrated,
+  resolveThreadPresentationRestore,
 } from "./threadPresentationState";
 import {
   WORK_MODE_NO_SURFACE_NOTICE,
@@ -250,6 +251,8 @@ import {
   useTouchFixedPanelTabsState,
   useUpdateFixedPanelTabsState,
 } from "@/lib/fixed-panel-tabs";
+import { useThreadTabs } from "@/hooks/queries/thread-tabs-query";
+import { areThreadTabListsEquivalent } from "@/lib/thread-tabs-sync";
 import { createNewTabFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
 import { isRootThread } from "./threadParentSelectorOptions";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
@@ -527,6 +530,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   useFixedPanelTabsStorageMaintenance(threadId);
   const systemConfigQuery = useSystemConfig();
   const fixedPanelTabsState = useFixedPanelTabsState(threadId, threadId);
+  const threadTabsQuery = useThreadTabs(threadId);
   const isPersistedSecondaryPanelOpen = fixedPanelTabsState.secondary.isOpen;
   const activeFixedSecondaryTab = getActiveFixedSecondaryTab({
     fixedPanelTabsState,
@@ -1388,14 +1392,25 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   const hasEligibleSurface = hasEligibleWorkSurface(
     fixedPanelTabsState.secondary.tabs,
   );
-  const isWorkModeActive =
-    isWorkMode &&
-    canEnterThreadWorkMode({
-      hasEligibleWorkSurface: hasEligibleSurface,
-      isCompactViewport: renderSecondaryPanelAsDrawer,
-      isSecondaryPanelOpen,
-      isStandaloneLayout,
-    });
+  const canEnterWorkMode = canEnterThreadWorkMode({
+    hasEligibleWorkSurface: hasEligibleSurface,
+    isCompactViewport: renderSecondaryPanelAsDrawer,
+    isSecondaryPanelOpen,
+    isStandaloneLayout,
+  });
+  const isWorkModeActive = isWorkMode && canEnterWorkMode;
+  const tabsHydrated = haveThreadTabsHydrated({
+    hasQueryError: threadTabsQuery.isError,
+    hasSettledQuery: threadTabsQuery.isFetched,
+    isLocalOnlyRevision: threadTabsQuery.data?.revision === 0,
+    localMatchesRemote:
+      threadTabsQuery.data !== undefined &&
+      areThreadTabListsEquivalent(
+        fixedPanelTabsState.secondary.tabs,
+        threadTabsQuery.data.tabs,
+      ),
+    localTabCount: fixedPanelTabsState.secondary.tabs.length,
+  });
   const surfaceArrangement = resolveThreadSurfaceArrangement(
     resolveThreadPresentationMode(isWorkModeActive),
   );
@@ -1444,30 +1459,37 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     setWorkSurfaceRecencyTabIds,
   ]);
   useEffect(() => {
+    const restoreDecision = resolveThreadPresentationRestore({
+      canEnterWorkMode,
+      state: presentationState,
+      tabs: fixedPanelTabsState.secondary.tabs,
+      tabsHydrated,
+    });
+    if (restoreDecision.kind === "wait") {
+      return;
+    }
     const didChangeThread = resetWorkSurfaceSnapshotIfThreadChanged();
     if (restoredPresentationThreadIdRef.current !== threadId) {
       restoredPresentationThreadIdRef.current = threadId;
-      const restored = restoreThreadPresentationState({
-        state: presentationState,
-        tabs: fixedPanelTabsState.secondary.tabs,
-      });
       if (
-        !areThreadPresentationStatesEqual(presentationState, restored.state)
+        !areThreadPresentationStatesEqual(
+          presentationState,
+          restoreDecision.state,
+        )
       ) {
-        setPresentationState(restored.state);
+        setPresentationState(restoreDecision.state);
       }
       if (
-        restored.state.mode === "work" &&
-        restored.activateTabId !== null &&
-        restored.activateTabId !== activeFixedSecondaryTabId
+        restoreDecision.activateTabId !== null &&
+        restoreDecision.activateTabId !== activeFixedSecondaryTabId
       ) {
-        activateTab(restored.activateTabId);
+        activateTab(restoreDecision.activateTabId);
       }
       const restoredTab =
-        restored.activateTabId === null
+        restoreDecision.activateTabId === null
           ? activeFixedSecondaryTab
           : (fixedPanelTabsState.secondary.tabs.find(
-              (tab) => tab.id === restored.activateTabId,
+              (tab) => tab.id === restoreDecision.activateTabId,
             ) ?? activeFixedSecondaryTab);
       previousWorkSurfaceRef.current = createWorkSurfaceSnapshot({
         activeTab: restoredTab,
@@ -1487,7 +1509,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
       tabs: fixedPanelTabsState.secondary.tabs,
     });
     if (result.kind === "exit") {
-      setIsWorkMode(false);
+      setIsWorkMode(() => false);
       appToast.message(WORK_MODE_NO_SURFACE_NOTICE, {
         id: `thread-work-mode-exit:${threadId}`,
       });
@@ -1519,18 +1541,20 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     activateTab,
     activeFixedSecondaryTab,
     activeFixedSecondaryTabId,
+    canEnterWorkMode,
     fixedPanelTabsState.secondary.tabs,
     isWorkMode,
     presentationState,
     resetWorkSurfaceSnapshotIfThreadChanged,
     setIsWorkMode,
     setPresentationState,
+    tabsHydrated,
     threadId,
     workSurfaceRecencyTabIds,
   ]);
   const toggleWorkMode = useCallback(() => {
     if (isWorkMode) {
-      setIsWorkMode(false);
+      setIsWorkMode(() => false);
       return;
     }
     const entry = resolveEnterThreadWorkMode({
@@ -1547,7 +1571,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     ) {
       activateTab(entry.activeTabId);
     }
-    setIsWorkMode(true);
+    setIsWorkMode(() => true);
   }, [
     activateTab,
     activeFixedSecondaryTabId,
@@ -1558,13 +1582,13 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   ]);
   const handleCloseSecondaryPanel = useCallback(() => {
     if (isWorkMode) {
-      setIsWorkMode(false);
+      setIsWorkMode(() => false);
     }
     closeSecondaryPanel();
   }, [closeSecondaryPanel, isWorkMode, setIsWorkMode]);
   const handleToggleSecondaryPanel = useCallback(() => {
     if (isSecondaryPanelOpen && isWorkMode) {
-      setIsWorkMode(false);
+      setIsWorkMode(() => false);
     }
     toggleSecondaryPanel();
   }, [isSecondaryPanelOpen, isWorkMode, setIsWorkMode, toggleSecondaryPanel]);

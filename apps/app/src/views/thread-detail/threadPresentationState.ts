@@ -1,5 +1,11 @@
 import { z } from "zod";
-import type { FixedPanelTab } from "@/lib/fixed-panel-tabs-state";
+import {
+  EMPTY_FIXED_PANEL_TABS_STATE,
+  getFixedPanelTabsStateStorageKey,
+  isFixedPanelTabsStateExpired,
+  parseFixedPanelTabsState,
+  type FixedPanelTab,
+} from "@/lib/fixed-panel-tabs-state";
 import {
   type ThreadPresentationMode,
   DEFAULT_CONVERSATION_RAIL_WIDTH_PERCENT,
@@ -100,10 +106,23 @@ export function resolveStoredThreadPresentationState(args: {
   legacyCollapsedStoredValue: string | null;
   storedValue: string | null;
 }): ThreadPresentationState {
-  return (
-    parseThreadPresentationState(args.storedValue) ??
-    migrateLegacyCollapsedPresentationState(args.legacyCollapsedStoredValue)
-  );
+  return readThreadPresentationStateFromStorage(args).state;
+}
+
+export function readThreadPresentationStateFromStorage(args: {
+  legacyCollapsedStoredValue: string | null;
+  storedValue: string | null;
+}): { persistMigratedValue: boolean; state: ThreadPresentationState } {
+  const parsed = parseThreadPresentationState(args.storedValue);
+  if (parsed !== null) {
+    return { persistMigratedValue: false, state: parsed };
+  }
+  return {
+    persistMigratedValue: true,
+    state: migrateLegacyCollapsedPresentationState(
+      args.legacyCollapsedStoredValue,
+    ),
+  };
 }
 
 export function areThreadPresentationStatesEqual(
@@ -144,6 +163,16 @@ function pruneRecencyTabIds(
   );
 }
 
+function presentActiveEligibleTabId(
+  tabId: string | null,
+  tabs: readonly Pick<FixedPanelTab, "id">[],
+): string | null {
+  if (tabId === null) {
+    return null;
+  }
+  return tabs.some((tab) => tab.id === tabId) ? tabId : null;
+}
+
 export function selectRestoredEligibleWorkSurface(args: {
   preferredTabId: string | null;
   recencyTabIds: readonly string[];
@@ -177,7 +206,10 @@ export function restoreThreadPresentationState(args: {
       state: {
         ...DEFAULT_THREAD_PRESENTATION_STATE,
         recencyTabIds,
-        activeEligibleTabId: args.state.activeEligibleTabId,
+        activeEligibleTabId: presentActiveEligibleTabId(
+          args.state.activeEligibleTabId,
+          args.tabs,
+        ),
       },
     };
   }
@@ -209,6 +241,108 @@ export function restoreThreadPresentationState(args: {
       ),
     },
   };
+}
+
+export type ThreadPresentationRestoreDecision =
+  | { kind: "wait" }
+  | {
+      activateTabId: string | null;
+      kind: "apply";
+      state: ThreadPresentationState;
+    };
+
+export function haveThreadTabsHydrated(args: {
+  hasQueryError: boolean;
+  hasSettledQuery: boolean;
+  isLocalOnlyRevision: boolean;
+  localMatchesRemote: boolean;
+  localTabCount: number;
+}): boolean {
+  if (!args.hasSettledQuery) {
+    return false;
+  }
+  if (args.hasQueryError) {
+    return true;
+  }
+  if (args.isLocalOnlyRevision && args.localTabCount > 0) {
+    return true;
+  }
+  return args.localMatchesRemote;
+}
+
+export function resolveThreadPresentationRestore(args: {
+  canEnterWorkMode: boolean;
+  state: ThreadPresentationState;
+  tabs: readonly FixedPanelTab[];
+  tabsHydrated: boolean;
+}): ThreadPresentationRestoreDecision {
+  if (!args.tabsHydrated) {
+    return { kind: "wait" };
+  }
+
+  const restored = restoreThreadPresentationState({
+    state: args.state,
+    tabs: args.tabs,
+  });
+  if (restored.state.mode === "work" && !args.canEnterWorkMode) {
+    return {
+      activateTabId: null,
+      kind: "apply",
+      state: restored.state,
+    };
+  }
+  return {
+    activateTabId: restored.activateTabId,
+    kind: "apply",
+    state: restored.state,
+  };
+}
+
+function getLocalStorage(): Storage | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return window.localStorage;
+}
+
+export function pruneThreadPresentationStateStorage(args: {
+  now: number;
+}): void {
+  const localStorage = getLocalStorage();
+  if (localStorage === null) {
+    return;
+  }
+
+  const keys: string[] = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key !== null && threadIdFromPresentationStorageKey(key) !== null) {
+      keys.push(key);
+    }
+  }
+
+  for (const key of keys) {
+    const threadId = threadIdFromPresentationStorageKey(key);
+    if (threadId === null) {
+      localStorage.removeItem(key);
+      continue;
+    }
+    const tabStoredValue = localStorage.getItem(
+      getFixedPanelTabsStateStorageKey({ threadId }),
+    );
+    if (tabStoredValue === null) {
+      localStorage.removeItem(key);
+      continue;
+    }
+    const tabState = parseFixedPanelTabsState({
+      initialValue: EMPTY_FIXED_PANEL_TABS_STATE,
+      now: args.now,
+      storedValue: tabStoredValue,
+    });
+    if (isFixedPanelTabsStateExpired({ now: args.now, state: tabState })) {
+      localStorage.removeItem(key);
+    }
+  }
 }
 
 export function parseConversationRailWidthPercent(
