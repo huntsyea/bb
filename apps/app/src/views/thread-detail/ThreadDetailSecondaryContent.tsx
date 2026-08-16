@@ -174,9 +174,19 @@ function ThreadDetailSecondaryContentBody({
    * takes the drawer. `isSecondaryPanelOpen` stays true throughout — it is
    * what makes a work surface available to promote — so restoring returns the
    * user to the open panel drawer they came from.
+   *
+   * The `isStandaloneLayout` term is defensive, not load-bearing: a hosted pane
+   * cannot be compact today, because `useSplitWorkspaceActive` turns the split
+   * workspace off on compact viewports and the route renders as a single page
+   * surface. Unlike the wide condition above, the prop gate alone does not
+   * imply standalone here — it admits a maximized hosted pane — so if splits
+   * were ever enabled on compact this branch would publish a
+   * `withoutResizablePanel` panel into the host PanelGroup and render a
+   * conversation drawer toggle whose drawer JSX sits behind the hosted early
+   * return.
    */
   const isCompactWorkModeActive =
-    isWorkMode && isSecondaryPanelOpen && renderAsDrawer;
+    isStandaloneLayout && isWorkMode && isSecondaryPanelOpen && renderAsDrawer;
   const isWorkModeActive = isWideWorkModeActive || isCompactWorkModeActive;
   /** The compact drawer holds the panel everywhere except compact Work mode. */
   const rendersPanelInDrawer = renderAsDrawer && !isCompactWorkModeActive;
