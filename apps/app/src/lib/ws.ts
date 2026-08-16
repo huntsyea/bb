@@ -5,6 +5,7 @@ import {
   realtimeSubscriptionTargetKey,
   threadOpenSignalLenientSchema,
   threadPaneActionSignalLenientSchema,
+  threadWorkModeSignalLenientSchema,
 } from "@bb/server-contract";
 import type {
   ClientMessage,
@@ -14,12 +15,14 @@ import type {
   ThreadOpenFile,
   ThreadOpenSignal,
   ThreadPaneActionSignal,
+  ThreadWorkModeSignal,
 } from "@bb/server-contract";
 import { buildDevWebSocketUrl } from "./dev-websocket-url";
 
 type ChangeCallback = (message: ChangedMessage) => void;
 type ThreadOpenCallback = (signal: ThreadOpenSignal) => void;
 type ThreadPaneActionCallback = (signal: ThreadPaneActionSignal) => void;
+type ThreadWorkModeCallback = (signal: ThreadWorkModeSignal) => void;
 type PluginSignalCallback = (signal: PluginSignal) => void;
 type ConnectedCallback = (event: { reconnected: boolean }) => void;
 type ConnectionStateCallback = () => void;
@@ -39,6 +42,7 @@ export class WebSocketManager {
   private callbacks = new Set<ChangeCallback>();
   private threadOpenCallbacks = new Set<ThreadOpenCallback>();
   private threadPaneActionCallbacks = new Set<ThreadPaneActionCallback>();
+  private threadWorkModeCallbacks = new Set<ThreadWorkModeCallback>();
   private pluginSignalCallbacks = new Set<PluginSignalCallback>();
   // Ephemeral "open this file in the secondary panel" intents, keyed by thread.
   // Held in memory only (cleared on reload) so a thread that is not currently
@@ -131,6 +135,14 @@ export class WebSocketManager {
       return;
     }
 
+    const threadWorkMode = threadWorkModeSignalLenientSchema.safeParse(parsed);
+    if (threadWorkMode.success) {
+      for (const cb of this.threadWorkModeCallbacks) {
+        cb(threadWorkMode.data);
+      }
+      return;
+    }
+
     // Ephemeral plugin realtime signal (bb.realtime.publish). Not buffered:
     // only live useRealtime subscribers care, and V1 has no replay.
     const pluginSignal = pluginSignalLenientSchema.safeParse(parsed);
@@ -211,6 +223,13 @@ export class WebSocketManager {
     this.threadPaneActionCallbacks.add(callback);
     return () => {
       this.threadPaneActionCallbacks.delete(callback);
+    };
+  }
+
+  onThreadWorkMode(callback: ThreadWorkModeCallback): () => void {
+    this.threadWorkModeCallbacks.add(callback);
+    return () => {
+      this.threadWorkModeCallbacks.delete(callback);
     };
   }
 

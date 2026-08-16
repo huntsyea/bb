@@ -145,6 +145,7 @@ Opening threads and files in the app:
     --line <number>                        Line number to focus
     --split <placement>                    right, down, left, top, or replace
   bb thread pane <action> [thread-id]      Maximize, restore, or toggle an open thread pane
+  bb thread work-mode <action> [thread-id] Enter, exit, or toggle Work mode for an open thread
 
   Inside a BB thread, BB_THREAD_ID selects the current thread automatically and
   the thread ID argument is omitted for file-only opens. Pass an explicit thread
@@ -154,6 +155,11 @@ Opening threads and files in the app:
   panes, it replaces the focused pane.
   Pane actions broadcast to connected BB app windows and affect the matching
   already-open pane without changing its split tree.
+  Work mode actions broadcast to connected BB app windows the same way. They
+  only apply when the target thread is open there and has an eligible work
+  surface (a file, diff, or other content tab) to promote; otherwise the
+  broadcast is ignored with no change. The command reports how many connected
+  clients received the broadcast, not whether any of them applied it.
   Paths can be thread-relative workspace paths, or absolute paths inside the
   target thread workspace. Absolute paths under BB_THREAD_STORAGE open as
   thread-storage files for the current thread. Use this for Markdown or HTML

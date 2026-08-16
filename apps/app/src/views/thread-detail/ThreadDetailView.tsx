@@ -215,6 +215,7 @@ import {
 } from "@/components/secondary-panel/useThreadFileTabs";
 import { isSecondaryFileTab } from "@/components/secondary-panel/secondaryPanelTabState";
 import { useThreadOpenFileSignal } from "@/components/secondary-panel/useThreadOpenFileSignal";
+import { wsManager } from "@/lib/ws";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
 import type { SecondaryPanelFileTab } from "@/components/secondary-panel/ThreadSecondaryPanel";
 import { useEnvironmentMergeBase } from "@/components/secondary-panel/git-diff/useEnvironmentMergeBase";
@@ -1608,6 +1609,50 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     setIsWorkMode,
     workSurfaceRecencyTabIds,
   ]);
+  // CLI/SDK Work mode actions arrive as ephemeral server broadcasts. Apply
+  // only when this thread is open here and, for enter/toggle-into-work-mode,
+  // has an eligible work surface; otherwise ignore without a state change.
+  useEffect(
+    () =>
+      wsManager.onThreadWorkMode((signal) => {
+        if (signal.threadId !== threadId) {
+          return;
+        }
+        const shouldBeWorkMode =
+          signal.action === "toggle" ? !isWorkMode : signal.action === "enter";
+        if (shouldBeWorkMode === isWorkMode) {
+          return;
+        }
+        if (!shouldBeWorkMode) {
+          setIsWorkMode(false);
+          return;
+        }
+        const entry = resolveEnterThreadWorkMode({
+          activeTabId: activeFixedSecondaryTabId,
+          recencyTabIds: workSurfaceRecencyTabIds,
+          tabs: fixedPanelTabsState.secondary.tabs,
+        });
+        if (!entry.canEnter) {
+          return;
+        }
+        if (
+          entry.activeTabId !== null &&
+          entry.activeTabId !== activeFixedSecondaryTabId
+        ) {
+          activateTab(entry.activeTabId);
+        }
+        setIsWorkMode(true);
+      }),
+    [
+      activateTab,
+      activeFixedSecondaryTabId,
+      fixedPanelTabsState.secondary.tabs,
+      isWorkMode,
+      setIsWorkMode,
+      threadId,
+      workSurfaceRecencyTabIds,
+    ],
+  );
   const handleCloseSecondaryPanel = useCallback(() => {
     if (isWorkMode) {
       setIsWorkMode(() => false);

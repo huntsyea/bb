@@ -28,6 +28,8 @@ import type {
   ThreadOpenResponse,
   ThreadPaneAction,
   ThreadPaneActionResponse,
+  ThreadWorkModeAction,
+  ThreadWorkModeResponse,
   ThreadPendingInteractionsResponse,
   ThreadQueuedMessageListResponse,
   ThreadResponse,
@@ -110,6 +112,7 @@ export type ThreadTimelineResult = ThreadTimelineResponse;
 export type ThreadArchiveResult = ThreadArchiveAllResponse;
 export type ThreadOpenResult = ThreadOpenResponse;
 export type ThreadPaneActionResult = ThreadPaneActionResponse;
+export type ThreadWorkModeResult = ThreadWorkModeResponse;
 export type ThreadDeleteResult = { ok: true };
 export type ThreadSendResult = { ok: true };
 export type ThreadRateLimitRecoveryResult = ProviderRateLimitRecoveryStatus;
@@ -265,6 +268,11 @@ export interface ThreadOpenArgs {
 
 export interface ThreadPaneActionArgs {
   action: ThreadPaneAction;
+  threadId: string;
+}
+
+export interface ThreadWorkModeArgs {
+  action: ThreadWorkModeAction;
   threadId: string;
 }
 
@@ -448,6 +456,7 @@ export interface ThreadsArea {
   markUnread(args: ThreadActionArgs): Promise<ThreadReadStateResult>;
   open(args: ThreadOpenArgs): Promise<ThreadOpenResult>;
   paneAction(args: ThreadPaneActionArgs): Promise<ThreadPaneActionResult>;
+  experimental_workMode(args: ThreadWorkModeArgs): Promise<ThreadWorkModeResult>;
   output(args: ThreadOutputArgs): Promise<ThreadOutputResponse>;
   pin(args: ThreadActionArgs): Promise<ThreadMutationResult>;
   promptHistory(
@@ -1009,6 +1018,14 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
     async paneAction(input) {
       return transport.readJson(
         transport.api.v1.threads[":id"]["pane-action"].$post({
+          param: { id: input.threadId },
+          json: { action: input.action },
+        }),
+      );
+    },
+    async experimental_workMode(input) {
+      return transport.readJson(
+        transport.api.v1.threads[":id"]["work-mode"].$post({
           param: { id: input.threadId },
           json: { action: input.action },
         }),
