@@ -3523,7 +3523,7 @@ export function RootComposeView() {
             renderBrowserDeck,
             isBrowserTabActive,
             isOpen: isSecondaryPanelOpen,
-            showConversationCollapseControl: false,
+            showWorkModeControl: false,
             showGitDiffTab: false,
             showInfoTab: false,
             inlinePanelToggle: panelTogglePlacement.inlinePanelToggle,

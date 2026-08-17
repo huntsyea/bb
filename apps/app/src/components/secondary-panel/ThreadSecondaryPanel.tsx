@@ -32,7 +32,6 @@ import { SECONDARY_PANEL_TOP_CHROME_BACKGROUND_CLASS } from "./panelChromeClasse
 import {
   CONVERSATION_DRAWER_CONTROL_LABEL,
   CONVERSATION_PENDING_INDICATOR_LABEL,
-  resolveConversationCollapseControl,
   resolveWorkModeControl,
 } from "./panelToggleControlState";
 import {
@@ -107,9 +106,6 @@ export function isSecondaryPanelLayoutTransition(
 ): boolean {
   return propertyName === "flex-grow" || propertyName === "flex-basis";
 }
-// While the conversation is collapsed the panel fills the content area, so its
-// size/max are lifted to the full width of the horizontal group.
-const CONVERSATION_COLLAPSED_PANEL_SIZE_PERCENT = 100;
 const PANEL_SCROLL_SLOT_CLASS =
   "min-h-0 flex-1 overflow-x-auto overflow-y-auto";
 const SECONDARY_RESIZABLE_PANEL_STYLE: CSSProperties = {
@@ -154,9 +150,9 @@ export function getSecondaryPanelChromeStackClassName(
   );
 }
 
-interface CollapsedPanelTrafficLightReserveArgs {
-  /** The conversation is collapsed, so this panel fills the content area. */
-  isConversationCollapsed: boolean;
+interface PrimaryWorkSurfaceTrafficLightReserveArgs {
+  /** Work mode is presenting this panel as the primary surface. */
+  isPrimaryWorkSurface: boolean;
   /** The compact drawer layout (never the window's top-left surface). */
   renderAsDrawer: boolean;
   /**
@@ -177,29 +173,28 @@ interface CollapsedPanelTrafficLightReserveArgs {
  * Left-padding class that clears the macOS traffic-light safe area for the
  * secondary panel's leading top-chrome toolbar, or `false` when no reserve is
  * needed. The reserve applies when the panel is the window's flush top-left
- * surface — the conversation is collapsed — while the main sidebar is collapsed
+ * surface — Work mode has made it primary — while the main sidebar is collapsed
  * and the lights are visible: the collapsed-left / expanded-right case from
  * BB-46. It lands the leading controls on the same x = 120px as
  * AppPageHeader's own reserve. See {@link MACOS_COLLAPSED_TOP_LEFT_RESERVE_CLASS}
  * for the geometry.
  *
- * Collapsing hands the panel the top-left on BOTH thread surfaces, so this does
- * not test for the split host. Either way the conversation column collapses to
- * zero width — the split host sets its layout to [0, panel], inline thread
- * detail sizes the timeline panel to 0 — and the thread header rides inside
- * that column, so nothing is left on the title-bar row but this toolbar. The
+ * Work mode hands the panel the top-left on BOTH thread surfaces, so this does
+ * not test for the split host. Either way the thread header rides inside the
+ * conversation column, which Work mode narrows to a rail below the panel's
+ * leading edge, so nothing is left on the title-bar row but this toolbar. The
  * split host reserved correctly because it satisfied the host gate; inline
  * thread detail, identical in layout, did not, which left its tab strip
  * sitting under the traffic lights.
  */
-export function resolveCollapsedPanelTrafficLightReserveClassName({
-  isConversationCollapsed,
+export function resolvePrimaryWorkSurfaceTrafficLightReserveClassName({
+  isPrimaryWorkSurface,
   renderAsDrawer,
   isSidebarShowing,
   reserveMacosTrafficLights,
-}: CollapsedPanelTrafficLightReserveArgs): string | false {
+}: PrimaryWorkSurfaceTrafficLightReserveArgs): string | false {
   const reserves =
-    isConversationCollapsed &&
+    isPrimaryWorkSurface &&
     !renderAsDrawer &&
     isSidebarShowing === false &&
     reserveMacosTrafficLights;
@@ -250,7 +245,7 @@ export interface ThreadSecondaryPanelProps {
    */
   isBrowserTabActive?: boolean;
   isOpen: boolean;
-  showConversationCollapseControl?: boolean;
+  showWorkModeControl?: boolean;
   showGitDiffTab?: boolean;
   showInfoTab?: boolean;
   showNewTabButton?: boolean;
@@ -301,22 +296,10 @@ export interface ThreadSecondaryPanelProps {
   onOpenFilePreview?: (path: string) => void;
   onSelectionAddToChat?: (text: string) => void;
   /**
-   * When true the conversation pane is collapsed: this panel expands to fill
-   * the content area (its max size is lifted). Always false in the
-   * drawer/compact layout. Standalone Thread detail uses Work mode instead.
-   */
-  isConversationCollapsed: boolean;
-  /**
-   * Toggles {@link isConversationCollapsed}. Hosted split panes fall back to
-   * this resource-only collapse control when the Thread has no eligible
-   * work surface to make primary. Unused in the drawer.
-   */
-  onToggleConversationCollapse: () => void;
-  /**
    * Thread Work mode. When provided, the panel toolbar shows the enter/restore
-   * Work mode control instead of the resource-only collapse. Hosted split panes
-   * pass it too: entering Work mode maximizes the owning pane, so its panel
-   * becomes the window's primary surface.
+   * Work mode control. Hosted split panes pass it too: entering Work mode
+   * maximizes the owning pane, so its panel becomes the window's primary
+   * surface.
    */
   isWorkMode?: boolean;
   canEnterWorkMode?: boolean;
@@ -394,7 +377,7 @@ export function ThreadSecondaryPanel({
   browserDeck,
   isBrowserTabActive = false,
   isOpen,
-  showConversationCollapseControl = true,
+  showWorkModeControl = true,
   showGitDiffTab = true,
   showInfoTab = true,
   showNewTabButton = true,
@@ -414,8 +397,6 @@ export function ThreadSecondaryPanel({
   onOpenFileInEditor,
   onOpenFilePreview,
   onSelectionAddToChat,
-  isConversationCollapsed,
-  onToggleConversationCollapse,
   isWorkMode = false,
   canEnterWorkMode = true,
   onToggleWorkMode,
@@ -437,22 +418,17 @@ export function ThreadSecondaryPanel({
     isPrimaryWorkSurface,
   });
   // The Work mode control also belongs in the compact drawer: that drawer is
-  // where the work surface lives before it is promoted to the page. The
-  // resource-only collapse control stays wide-layout-only.
-  const conversationCollapseControl = !showConversationCollapseControl
-    ? null
-    : onToggleWorkMode
+  // where the work surface lives before it is promoted to the page. Panels
+  // whose layout owner offers no Work mode (root compose, a hosted pane with
+  // no eligible work surface) render no presentation control at all.
+  const workModeControl =
+    showWorkModeControl && onToggleWorkMode
       ? resolveWorkModeControl({
           canEnterWorkMode,
           isWorkMode,
           onToggleWorkMode,
         })
-      : renderAsDrawer
-        ? null
-        : resolveConversationCollapseControl({
-            isConversationCollapsed,
-            onToggleConversationCollapse,
-          });
+      : null;
   const {
     gitDiffDisplayMode,
     handleGitDiffDisplayModeChange,
@@ -603,12 +579,11 @@ export function ThreadSecondaryPanel({
   const desktopWindowState = useDesktopWindowState();
   const isSidebarShowing = useOptionalIsSidebarShowing();
   // The panel reserves the traffic-light safe area only when it is the window's
-  // flush top-left surface (conversation collapsed) with the main sidebar
-  // collapsed and the lights visible. See
-  // resolveCollapsedPanelTrafficLightReserveClassName.
-  const collapsedPanelTrafficLightReserveClassName =
-    resolveCollapsedPanelTrafficLightReserveClassName({
-      isConversationCollapsed: isConversationCollapsed || isPrimaryWorkSurface,
+  // flush top-left surface (Work mode) with the main sidebar collapsed and the
+  // lights visible. See resolvePrimaryWorkSurfaceTrafficLightReserveClassName.
+  const primaryWorkSurfaceTrafficLightReserveClassName =
+    resolvePrimaryWorkSurfaceTrafficLightReserveClassName({
+      isPrimaryWorkSurface,
       renderAsDrawer,
       isSidebarShowing,
       reserveMacosTrafficLights: shouldReserveMacosTrafficLights({
@@ -687,13 +662,7 @@ export function ThreadSecondaryPanel({
             // Inside the split-workspace host, the hairline resize handle is the
             // visible seam; elsewhere the panel carries its own hairline border
             // (it slides with the panel through the open/close animation).
-            // Collapsing the conversation drops the timeline and the resize
-            // handle to zero width, so this border would land directly on the app
-            // sidebar's own `border-r` and read as one thick double seam. The
-            // sidebar owns that boundary, so give the border up while collapsed.
-            hostLayout === null &&
-              !isConversationCollapsed &&
-              "border-l border-border-seam",
+            hostLayout === null && "border-l border-border-seam",
             isSecondaryPanelResizing && "right-0",
             !isOpen && "pointer-events-none",
           ],
@@ -715,9 +684,9 @@ export function ThreadSecondaryPanel({
           <div
             className={cn(
               "flex min-w-0 flex-1 items-center gap-1",
-              // When this panel owns the window's top-left (conversation
-              // collapsed, on either thread surface, with the sidebar
-              // collapsed), reserve the traffic-light
+              // When this panel owns the window's top-left (Work mode, on
+              // either thread surface, with the sidebar collapsed), reserve the
+              // traffic-light
               // safe area so the leading controls clear the lights and the
               // pinned sidebar trigger. The padding must animate on the SAME
               // timing/easing as the panel's collapse slide
@@ -729,7 +698,7 @@ export function ThreadSecondaryPanel({
               // panel reach the left edge before the padding fills, briefly
               // sliding the leading controls back under the lights/trigger.
               `transition-[padding] ${PANEL_COLLAPSE_TRANSITION_CLASS}`,
-              collapsedPanelTrafficLightReserveClassName,
+              primaryWorkSurfaceTrafficLightReserveClassName,
             )}
             // A toolbar, not a tablist: the pinned Info view, Diff control, and
             // open-view pills are toggle buttons (`aria-pressed`) rather than
@@ -835,7 +804,7 @@ export function ThreadSecondaryPanel({
                 ) : null}
               </div>
             ) : null}
-            {conversationCollapseControl ? (
+            {workModeControl ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -849,17 +818,17 @@ export function ThreadSecondaryPanel({
                       "shrink-0",
                       usesDesktopChrome && MACOS_WINDOW_NO_DRAG_CLASS,
                     )}
-                    onClick={conversationCollapseControl.onClick}
-                    aria-label={conversationCollapseControl.label}
-                    aria-pressed={conversationCollapseControl.isPressed}
-                    disabled={conversationCollapseControl.disabled}
+                    onClick={workModeControl.onClick}
+                    aria-label={workModeControl.label}
+                    aria-pressed={workModeControl.isPressed}
+                    disabled={workModeControl.disabled}
                     data-testid="thread-work-mode-toggle"
                   >
-                    <Icon name={conversationCollapseControl.iconName} />
+                    <Icon name={workModeControl.iconName} />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {conversationCollapseControl.label}
+                  {workModeControl.label}
                 </TooltipContent>
               </Tooltip>
             ) : null}
@@ -976,7 +945,6 @@ export function ThreadSecondaryPanel({
     <>
       <SecondaryPanelResizeHandle
         isOpen={isOpen}
-        isConversationCollapsed={isConversationCollapsed}
         isWorkMode={isPrimaryWorkSurface}
         matchesSplitDividers={hostLayout !== null}
         onDragging={handleSecondaryPanelDragging}
@@ -989,9 +957,7 @@ export function ThreadSecondaryPanel({
         collapsedSize={0}
         defaultSize={
           isLayoutOpen
-            ? isConversationCollapsed
-              ? CONVERSATION_COLLAPSED_PANEL_SIZE_PERCENT
-              : (resizablePanelLayout?.sizePercent ?? persistedWidthPercent)
+            ? (resizablePanelLayout?.sizePercent ?? persistedWidthPercent)
             : 0
         }
         minSize={
@@ -1000,11 +966,9 @@ export function ThreadSecondaryPanel({
             : THREAD_SECONDARY_PANEL_MIN_SIZE_PERCENT
         }
         maxSize={
-          isConversationCollapsed
-            ? CONVERSATION_COLLAPSED_PANEL_SIZE_PERCENT
-            : isPrimaryWorkSurface
-              ? 100 - CONVERSATION_RAIL_MIN_SIZE_PERCENT
-              : THREAD_SECONDARY_PANEL_MAX_SIZE_PERCENT
+          isPrimaryWorkSurface
+            ? 100 - CONVERSATION_RAIL_MIN_SIZE_PERCENT
+            : THREAD_SECONDARY_PANEL_MAX_SIZE_PERCENT
         }
         onCollapse={handlePanelCollapse}
         onResize={handlePanelResize}
@@ -1122,7 +1086,6 @@ function NewTabButton({
 
 interface SecondaryPanelResizeHandleProps {
   isOpen: boolean;
-  isConversationCollapsed: boolean;
   isWorkMode?: boolean;
   /**
    * True inside the split-workspace host, where the panel sits beside split
@@ -1136,20 +1099,18 @@ interface SecondaryPanelResizeHandleProps {
 
 function SecondaryPanelResizeHandle({
   isOpen,
-  isConversationCollapsed,
   isWorkMode = false,
   matchesSplitDividers,
   onDragging,
   visualOrder,
 }: SecondaryPanelResizeHandleProps) {
   const isResizing = useAtomValue(threadSecondaryPanelResizingAtom);
-  const isResizeEnabled = isOpen && !isConversationCollapsed;
+  const isResizeEnabled = isOpen;
   return (
     <PanelResizeHandle
       id="thread-detail-secondary-panel-handle"
-      // Dragging is meaningless while collapsed (the conversation is at zero
-      // width); the panel header's restore control is the only affordance in
-      // that state. Work mode keeps the rail resizable.
+      // Nothing to drag while the panel is closed. Work mode keeps the rail
+      // resizable.
       disabled={!isResizeEnabled}
       onDragging={onDragging}
       hitAreaMargins={PANEL_RESIZE_HIT_AREA_MARGINS}
@@ -1158,7 +1119,7 @@ function SecondaryPanelResizeHandle({
         "group relative shrink-0 overflow-visible transition-[width,opacity,background-color]",
         PANEL_RESIZE_HANDLE_LAYER_CLASS,
         PANEL_COLLAPSE_TRANSITION_CLASS,
-        isConversationCollapsed ? "cursor-default" : "cursor-col-resize",
+        "cursor-col-resize",
         matchesSplitDividers
           ? [
               // Match SplitDivider: a one-pixel vertical seam that warms on
@@ -1175,8 +1136,7 @@ function SecondaryPanelResizeHandle({
               // (aside border-l), so this handle is purely the drag hit area +
               // hover seam and sits exactly on that border instead of in a 1px
               // slot to its left (which left the hit area and hover highlight
-              // a pixel off the border). Hidden + non-interactive when closed
-              // or while the conversation is collapsed.
+              // a pixel off the border). Hidden + non-interactive when closed.
               "bg-transparent",
               isResizeEnabled
                 ? "w-0 opacity-100"

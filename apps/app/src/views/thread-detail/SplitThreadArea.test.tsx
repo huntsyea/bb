@@ -66,9 +66,6 @@ const threadStore = vi.hoisted(
 const experimentState = vi.hoisted(() => ({ enabled: true }));
 const viewportState = vi.hoisted(() => ({ compact: false }));
 const sidebarState = vi.hoisted(() => ({ showing: true }));
-const conversationCollapseState = vi.hoisted(() => ({
-  isMainCollapsed: false,
-}));
 const panelGroupLayoutState = vi.hoisted(() => ({ layout: [100, 0] }));
 const panelCallbacks = vi.hoisted(
   () =>
@@ -107,7 +104,6 @@ function RootComposeFixture() {
     () => ({
       composerHost: null,
       contentKey: "new-thread",
-      isMainCollapsed: false,
       isOpen: isPanelOpen,
       panel: <div data-testid="hosted-new-thread-panel" />,
       onToggle: () => setIsPanelOpen((open) => !open),
@@ -264,7 +260,6 @@ vi.mock("./ThreadDetailView", () => ({
       () => ({
         composerHost,
         contentKey: threadId,
-        isMainCollapsed: conversationCollapseState.isMainCollapsed,
         isOpen: isPanelOpen,
         panel: (
           <div data-testid={`hosted-panel-${threadId}`}>
@@ -636,7 +631,6 @@ beforeEach(() => {
   experimentState.enabled = true;
   viewportState.compact = false;
   sidebarState.showing = true;
-  conversationCollapseState.isMainCollapsed = false;
   panelGroupLayoutState.layout = [100, 0];
   commandHandlers.clear();
   commandPresentationState.isModifierHeld = false;
@@ -1021,28 +1015,6 @@ describe("SplitThreadArea", () => {
       '[data-split-pane-id="pane-1"]',
     );
     expect(paneA?.getAttribute("data-maximized")).toBeNull();
-  });
-
-  it("temporarily replaces the conversation collapse with a clean thread full screen", async () => {
-    conversationCollapseState.isMainCollapsed = true;
-    renderSplitArea({
-      path: threadPath("thr-a"),
-      layout: twoPaneLayout("pane-1"),
-    });
-
-    expect(screen.queryByTestId("mock-collapsed-thread-rail")).toBeNull();
-    fireEvent.click(screen.getByTestId("maximize-thr-a"));
-
-    expect(screen.getByTestId("maximize-thr-a").textContent).toBe("restore");
-    await waitFor(() => {
-      expect(panelGroupLayoutState.layout).toEqual([100, 0]);
-    });
-
-    fireEvent.click(screen.getByTestId("maximize-thr-a"));
-    expect(screen.queryByTestId("mock-collapsed-thread-rail")).toBeNull();
-    await waitFor(() => {
-      expect(panelGroupLayoutState.layout).toEqual([0, 100]);
-    });
   });
 
   it("preserves a hidden pane's mounted scroll position through restore", async () => {

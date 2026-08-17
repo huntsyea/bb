@@ -151,7 +151,6 @@ function BrowserTabStage({ tab, threadId, width }: BrowserTabStageProps) {
           />
         }
         isBrowserTabActive
-        isConversationCollapsed={false}
         isOpen
         metadataContent={null}
         onClose={noop}
@@ -160,7 +159,6 @@ function BrowserTabStage({ tab, threadId, width }: BrowserTabStageProps) {
         onOpenNewTab={noop}
         onPanelChange={noop}
         onPanelFocus={noop}
-        onToggleConversationCollapse={noop}
         renderAsDrawer
         showGitDiffTab={false}
       />

@@ -60,7 +60,6 @@ import {
 } from "./ThreadSurfaceHost";
 
 const CLOSED_TIMELINE_PANEL_SIZE_PERCENT = 100;
-const COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT = 0;
 const TIMELINE_PANEL_MIN_SIZE_PERCENT = 30;
 
 type ThreadTimelinePaneProps = Omit<
@@ -71,8 +70,6 @@ type ThreadSecondaryPanelProps = Omit<
   ComponentProps<typeof ThreadSecondaryPanel>,
   | "metadataContent"
   | "renderAsDrawer"
-  | "isConversationCollapsed"
-  | "onToggleConversationCollapse"
   | "isWorkMode"
   | "onToggleWorkMode"
   | "browserDeck"
@@ -87,7 +84,6 @@ interface ThreadDetailSecondaryContentProps {
   header: ReactNode;
   isMetadataLoading: boolean;
   isSecondaryPanelOpen: boolean;
-  isConversationCollapsed: boolean;
   isWorkMode: boolean;
   /**
    * True while an approval or a question is waiting in the conversation. In
@@ -104,7 +100,6 @@ interface ThreadDetailSecondaryContentProps {
    */
   isBoundedPane: boolean;
   onToggleSecondaryPanel: () => void;
-  onToggleConversationCollapse: () => void;
   onToggleWorkMode: () => void;
   renderHostedPanel: (panel: ReactNode) => ReactNode;
   metadata: ThreadMetadataContentProps;
@@ -128,12 +123,10 @@ function ThreadDetailSecondaryContentBody({
   header,
   isMetadataLoading,
   isSecondaryPanelOpen,
-  isConversationCollapsed,
   isWorkMode,
   hasPendingInteraction,
   isBoundedPane,
   onToggleSecondaryPanel,
-  onToggleConversationCollapse,
   onToggleWorkMode,
   renderHostedPanel,
   metadata,
@@ -160,7 +153,6 @@ function ThreadDetailSecondaryContentBody({
     threadSecondaryPanelResizingAtom,
   );
   const isStandaloneLayout = secondaryPanelHost === null;
-  const isStandaloneWideLayout = isStandaloneLayout && !renderAsDrawer;
   // `isWorkMode` already carries the caller's eligibility gate, which for a
   // hosted pane includes holding the whole workspace. A hosted pane that
   // reaches this point therefore renders the same work-surface-primary layout
@@ -190,15 +182,6 @@ function ThreadDetailSecondaryContentBody({
   const isWorkModeActive = isWideWorkModeActive || isCompactWorkModeActive;
   /** The compact drawer holds the panel everywhere except compact Work mode. */
   const rendersPanelInDrawer = renderAsDrawer && !isCompactWorkModeActive;
-  // Conversation collapse is the hosted-pane fallback for panes that have no
-  // Work mode to offer. Work mode supersedes it wherever it is active.
-  const canCollapseConversation =
-    !isStandaloneWideLayout &&
-    !isWorkModeActive &&
-    isSecondaryPanelOpen &&
-    !renderAsDrawer;
-  const isConversationCollapsedActive =
-    canCollapseConversation && isConversationCollapsed;
   const layoutSizes = resolveThreadWorkModeLayoutSizes({
     isWorkMode: isWorkModeActive,
     isSecondaryPanelOpen: isSecondaryPanelOpen && !renderAsDrawer,
@@ -371,22 +354,18 @@ function ThreadDetailSecondaryContentBody({
   useEffect(() => {
     conversationRailWidthRef.current = conversationRailWidthPercent;
   }, [conversationRailWidthPercent]);
-  const didMountConversationCollapseRef = useRef(false);
+  const didMountPresentationLayoutRef = useRef(false);
   useLayoutEffect(() => {
     // Initial mount is handled by each panel's defaultSize; only animate when
-    // the collapse state changes afterwards. A layout effect keeps the
+    // the presentation state changes afterwards. A layout effect keeps the
     // secondary panel's lifted max size and the new layout in the same commit,
     // avoiding a flicker through the clamped 70% intermediate.
-    if (!didMountConversationCollapseRef.current) {
-      didMountConversationCollapseRef.current = true;
+    if (!didMountPresentationLayoutRef.current) {
+      didMountPresentationLayoutRef.current = true;
       return;
     }
     const group = horizontalPanelGroupRef.current;
     if (group === null || renderAsDrawer || !isSecondaryPanelOpen) {
-      return;
-    }
-    if (isConversationCollapsedActive) {
-      group.setLayout([COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT, 100]);
       return;
     }
     if (isWorkModeActive) {
@@ -398,12 +377,7 @@ function ThreadDetailSecondaryContentBody({
     }
     const secondaryWidth = persistedSecondaryWidthRef.current;
     group.setLayout([100 - secondaryWidth, secondaryWidth]);
-  }, [
-    isConversationCollapsedActive,
-    isSecondaryPanelOpen,
-    isWorkModeActive,
-    renderAsDrawer,
-  ]);
+  }, [isSecondaryPanelOpen, isWorkModeActive, renderAsDrawer]);
 
   // Mirror ForksRow's query (deduped by react-query) so the visibility gate
   // accounts for the lazily-fetched Forks row.
@@ -430,11 +404,11 @@ function ThreadDetailSecondaryContentBody({
       ),
     [hasForks, isMetadataLoading, stableMetadata],
   );
-  // A hosted pane with no eligible work surface keeps the conversation-collapse
-  // control: swapping in a permanently disabled Work mode control there would
-  // take away a working affordance. The standalone surface has no collapse
-  // fallback, so it always shows the Work mode control — on compact too, where
-  // the control is what promotes this panel to the page.
+  // A hosted pane with no eligible work surface offers no Work mode, so its
+  // panel toolbar shows no presentation control at all; the host's "Hide right
+  // panel" control and the resize handle remain. The standalone surface always
+  // shows the control — on compact too, where it is what promotes this panel to
+  // the page — and disables it while there is nothing to promote.
   const showsWorkModeControl =
     isStandaloneLayout || threadSecondaryPanelProps.canEnterWorkMode;
   const inlineSecondaryPanelContent = useMemo(
@@ -447,8 +421,6 @@ function ThreadDetailSecondaryContentBody({
           // Promoted to the page in compact Work mode: no PanelGroup around it,
           // so it must not emit a resize handle or a Panel wrapper.
           withoutResizablePanel={isCompactWorkModeActive}
-          isConversationCollapsed={isConversationCollapsedActive}
-          onToggleConversationCollapse={onToggleConversationCollapse}
           isWorkMode={isWorkModeActive}
           onToggleWorkMode={showsWorkModeControl ? onToggleWorkMode : undefined}
           workModeToggleId={workModeToggleElementId}
@@ -456,7 +428,8 @@ function ThreadDetailSecondaryContentBody({
             isCompactWorkModeActive ? conversationDrawerControl : undefined
           }
           // The owning thread or workspace header shows a closed panel. Once
-          // open, collapse belongs at the outer edge of the panel toolbar.
+          // open, the hide control belongs at the outer edge of the panel
+          // toolbar.
           inlinePanelToggle="button"
           // In the split-workspace host, panes' panels share one PanelGroup, so
           // each pane's Panel needs its own layout identity (see the prop doc).
@@ -486,10 +459,8 @@ function ThreadDetailSecondaryContentBody({
       browserDeck,
       conversationDrawerControl,
       isCompactWorkModeActive,
-      isConversationCollapsedActive,
       isWorkModeActive,
       metadataContent,
-      onToggleConversationCollapse,
       onToggleWorkMode,
       paneId,
       rendersPanelInDrawer,
@@ -506,8 +477,6 @@ function ThreadDetailSecondaryContentBody({
       {...threadSecondaryPanelProps}
       browserDeck={browserDeck}
       renderAsDrawer={true}
-      isConversationCollapsed={false}
-      onToggleConversationCollapse={onToggleConversationCollapse}
       isWorkMode={false}
       onToggleWorkMode={showsWorkModeControl ? onToggleWorkMode : undefined}
       workModeToggleId={workModeToggleElementId}
@@ -518,7 +487,6 @@ function ThreadDetailSecondaryContentBody({
     () => ({
       composerHost,
       contentKey: stableTimeline.threadId,
-      isMainCollapsed: isConversationCollapsedActive,
       isOpen: isSecondaryPanelOpen,
       panel: renderHostedPanel(inlineSecondaryPanelContent),
       onToggle: onToggleSecondaryPanel,
@@ -526,7 +494,6 @@ function ThreadDetailSecondaryContentBody({
     [
       composerHost,
       inlineSecondaryPanelContent,
-      isConversationCollapsedActive,
       isSecondaryPanelOpen,
       onToggleSecondaryPanel,
       renderHostedPanel,
@@ -540,16 +507,7 @@ function ThreadDetailSecondaryContentBody({
   const conversationRegion = (
     <div
       data-thread-region="conversation"
-      data-conversation-collapsed={isConversationCollapsedActive}
-      // `inert` removes the hidden conversation (header, timeline,
-      // composer) from the tab order and a11y tree and blocks pointer
-      // events, so keyboard focus can't land in the invisible pane.
-      inert={isConversationCollapsedActive}
-      className={cn(
-        "flex h-full min-h-0 min-w-0 flex-col transition-opacity",
-        PANEL_COLLAPSE_TRANSITION_CLASS,
-        isConversationCollapsedActive && "opacity-0",
-      )}
+      className="flex h-full min-h-0 min-w-0 flex-col"
     >
       {header}
       <ThreadTimelinePane {...stableTimeline} footer={footer} />
@@ -560,15 +518,7 @@ function ThreadDetailSecondaryContentBody({
     return (
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-clip">
         {header}
-        <div
-          data-conversation-collapsed={isConversationCollapsedActive}
-          inert={isConversationCollapsedActive}
-          className={cn(
-            "flex min-h-0 min-w-0 flex-1 flex-col transition-opacity",
-            PANEL_COLLAPSE_TRANSITION_CLASS,
-            isConversationCollapsedActive && "opacity-0",
-          )}
-        >
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <ThreadTimelinePane {...stableTimeline} footer={footer} />
         </div>
       </div>
@@ -584,11 +534,10 @@ function ThreadDetailSecondaryContentBody({
       )}
     >
       {/*
-        When collapsed we keep the resizable PanelGroup mounted: the timeline
-        lifts to 0% and the panel to 100% via the layout effect. Nothing
+        Work mode keeps this PanelGroup mounted: the layout effect resizes the
+        two panels in place and ThreadSurfaceHost only reorders them. Nothing
         unmounts, so the secondary panel's content (live iframes, parsed diffs,
-        scroll position) is never torn down and re-created when toggling
-        collapse. The panel header's own toggle restores the conversation.
+        scroll position) survives switching between the two modes.
       */}
       {/* PanelGroup sets an inline `height: 100%`, so it needs this flex-sized
           row to resolve against rather than the column that also holds the
@@ -621,14 +570,10 @@ function ThreadDetailSecondaryContentBody({
               renderConversation={(layout) => (
                 <Panel
                   id="thread-detail-timeline-panel"
-                  collapsible={!isWorkModeActive}
-                  collapsedSize={COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT}
                   defaultSize={
-                    isConversationCollapsedActive
-                      ? COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT
-                      : isSecondaryPanelOpen && !renderAsDrawer
-                        ? layoutSizes.conversationSizePercent
-                        : CLOSED_TIMELINE_PANEL_SIZE_PERCENT
+                    isSecondaryPanelOpen && !renderAsDrawer
+                      ? layoutSizes.conversationSizePercent
+                      : CLOSED_TIMELINE_PANEL_SIZE_PERCENT
                   }
                   minSize={
                     isWorkModeActive

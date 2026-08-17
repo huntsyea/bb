@@ -4,7 +4,6 @@ import { createStore, type Atom } from "jotai";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CONVERSATION_RAIL_WIDTH_STORAGE_KEY,
-  getThreadConversationCollapsedAtom,
   getThreadConversationCollapsedStorageKey,
   getThreadPresentationStateAtom,
   getThreadWorkModeAtom,
@@ -172,7 +171,7 @@ describe("thread presentation persistence", () => {
     ).toBe(false);
   });
 
-  it("keeps a hosted collapse preference after presentation migration and reload", () => {
+  it("leaves the legacy collapsed value in place after migrating it", () => {
     window.localStorage.setItem(
       getThreadConversationCollapsedStorageKey({ threadId: "thr-hosted" }),
       "true",
@@ -183,16 +182,13 @@ describe("thread presentation persistence", () => {
         store.get(getThreadPresentationStateAtom("thr-hosted")),
       ).mode,
     ).toBe("work");
+    // The legacy key is read-only now: migration must not consume it, so an
+    // older build reinstalled before this state ages out still sees its value.
     expect(
       window.localStorage.getItem(
         getThreadConversationCollapsedStorageKey({ threadId: "thr-hosted" }),
       ),
     ).toBe("true");
-    expect(
-      hydrate((store) =>
-        store.get(getThreadConversationCollapsedAtom("thr-hosted")),
-      ),
-    ).toBe(true);
     expect(
       window.localStorage.getItem(
         getThreadPresentationCollapsedMigrationMarkerKey({

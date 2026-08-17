@@ -1,9 +1,7 @@
 export type PanelToggleAction =
   | "show-panel"
   | "enter-work-mode"
-  | "restore-conversation"
-  | "hide-conversation"
-  | "show-conversation";
+  | "restore-conversation";
 
 /**
  * Icon names the toggle can render. A subset of the Icon component's `IconName`
@@ -15,8 +13,8 @@ interface PanelToggleActionPresentation {
   label: string;
   iconName: PanelToggleIconName;
   /**
-   * Whether the action is currently presenting Work mode (or the hosted
-   * pane's remaining conversation collapse). This drives `aria-pressed`.
+   * Whether the action is currently presenting Work mode. This drives
+   * `aria-pressed`.
    */
   isPressed: boolean;
 }
@@ -40,16 +38,6 @@ const PANEL_TOGGLE_ACTION_PRESENTATION = {
     iconName: "Minimize2",
     isPressed: true,
   },
-  "hide-conversation": {
-    label: "Hide Conversation",
-    iconName: "Maximize2",
-    isPressed: false,
-  },
-  "show-conversation": {
-    label: "Show Conversation",
-    iconName: "Minimize2",
-    isPressed: true,
-  },
 } as const satisfies Record<PanelToggleAction, PanelToggleActionPresentation>;
 
 export interface PanelToggleControlState {
@@ -68,7 +56,7 @@ export interface ResolveShowPanelControlArgs {
 /**
  * The conversation header's panel affordance, used only while the secondary
  * panel is closed: a button that opens it. Once the panel is open the toggle
- * moves into the panel header (see {@link resolveConversationCollapseControl}).
+ * moves into the panel header (see {@link resolveWorkModeControl}).
  */
 export function resolveShowPanelControl({
   onToggleSecondaryPanel,
@@ -77,30 +65,6 @@ export function resolveShowPanelControl({
     action: "show-panel",
     ...PANEL_TOGGLE_ACTION_PRESENTATION["show-panel"],
     onClick: onToggleSecondaryPanel,
-  };
-}
-
-export interface ResolveConversationCollapseControlArgs {
-  isConversationCollapsed: boolean;
-  onToggleConversationCollapse: () => void;
-}
-
-/**
- * Resource-only conversation collapse, kept for hosted split panes whose
- * Thread has no eligible work surface. Distinct from the pane's own "Full
- * Screen" maximization control, which the two can render side by side.
- */
-export function resolveConversationCollapseControl({
-  isConversationCollapsed,
-  onToggleConversationCollapse,
-}: ResolveConversationCollapseControlArgs): PanelToggleControlState {
-  const action: PanelToggleAction = isConversationCollapsed
-    ? "show-conversation"
-    : "hide-conversation";
-  return {
-    action,
-    ...PANEL_TOGGLE_ACTION_PRESENTATION[action],
-    onClick: onToggleConversationCollapse,
   };
 }
 

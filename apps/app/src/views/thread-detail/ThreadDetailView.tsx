@@ -140,7 +140,6 @@ import {
 import type { HostConnectionNotice } from "./ThreadTimelinePane";
 import { useThreadStorageViewer } from "@/components/secondary-panel/useThreadStorageViewer";
 import {
-  getThreadConversationCollapsedAtom,
   getThreadPresentationStateAtom,
   getThreadWorkModeAtom,
   getThreadWorkSurfaceRecencyAtom,
@@ -1378,13 +1377,6 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     onSelectPath: handleSelectStorageBrowserPath,
     selectedPath: activeStorageFilePath,
   });
-  const [storedConversationCollapsed, setStoredConversationCollapsed] = useAtom(
-    getThreadConversationCollapsedAtom(threadId),
-  );
-  const isConversationCollapsed = storedConversationCollapsed;
-  const toggleConversationCollapse = useCallback(() => {
-    setStoredConversationCollapsed((collapsed) => !collapsed);
-  }, [setStoredConversationCollapsed]);
   const [isWorkMode, setIsWorkMode] = useAtom(getThreadWorkModeAtom(threadId));
   const [workSurfaceRecencyTabIds, setWorkSurfaceRecencyTabIds] = useAtom(
     getThreadWorkSurfaceRecencyAtom(threadId),
@@ -3059,12 +3051,10 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
           header={timelineHeader}
           isMetadataLoading={environmentQuery.isLoading}
           isSecondaryPanelOpen={isSecondaryPanelOpen}
-          isConversationCollapsed={isConversationCollapsed}
           isWorkMode={isWorkModeActive}
           hasPendingInteraction={hasPendingInteraction}
           isBoundedPane={isBoundedPane}
           onToggleSecondaryPanel={handleToggleSecondaryPanel}
-          onToggleConversationCollapse={toggleConversationCollapse}
           onToggleWorkMode={toggleWorkMode}
           renderHostedPanel={(panel) => (
             <MarkdownLocalFileContextMenuContext.Provider

@@ -55,16 +55,6 @@ export const secondaryPanelWidthPercentAtom = atomWithStorage<number>(
   { getOnInit: true },
 );
 
-const threadSecondaryPanelBooleanStorage =
-  createLocalStorageSyncStorage<boolean>({
-    parse: (storedValue, initialValue) => {
-      if (storedValue === "true") return true;
-      if (storedValue === "false") return false;
-      return initialValue;
-    },
-    serialize: (value) => String(value),
-  });
-
 function hasThreadId(
   threadId: ThreadSecondaryPanelThreadId,
 ): threadId is ResolvedThreadSecondaryPanelThreadId {
@@ -72,44 +62,11 @@ function hasThreadId(
 }
 
 /**
- * Whether a given thread's conversation/timeline pane is collapsed so the
- * secondary panel fills the whole content area. Keyed per thread (like the
- * terminal panel and recent-items state) so collapsing one thread's
- * conversation — e.g. opening an app from the sidebar — never
- * leaks into another thread or gets cleared by selecting an unrelated row.
- * Persisted per thread; only takes effect while the secondary panel is open on
- * a wide viewport — see ThreadDetailSecondaryContent for the gating.
+ * The legacy per-thread "conversation collapsed" flag no longer has a live
+ * atom: the presentation state it fed was retired. The read below stays so
+ * saved values from earlier builds still migrate into the presentation state
+ * (see threadPresentationState's collapsed migration).
  */
-const conversationCollapsedStorage = threadSecondaryPanelBooleanStorage;
-
-const threadConversationCollapsedAtomFamily = atomFamily(
-  (threadId: ResolvedThreadSecondaryPanelThreadId) =>
-    atomWithStorage<boolean>(
-      getThreadConversationCollapsedStorageKey({ threadId }),
-      false,
-      conversationCollapsedStorage,
-      { getOnInit: true },
-    ),
-);
-
-// Fallback for callers without a resolved thread id (e.g. before routing
-// settles). It stays false and any write lands on this throwaway atom, so no
-// real thread's collapse state is affected.
-const disabledThreadConversationCollapsedAtom = atom(false);
-
-/**
- * The conversation-collapsed atom for a specific thread. `atomFamily` memoizes
- * by threadId, so repeated calls with the same id return a stable atom
- * reference safe to pass straight to `useAtom`/`useSetAtom`/`useAtomValue`.
- */
-export function getThreadConversationCollapsedAtom(
-  threadId: ThreadSecondaryPanelThreadId,
-) {
-  return hasThreadId(threadId)
-    ? threadConversationCollapsedAtomFamily(threadId)
-    : disabledThreadConversationCollapsedAtom;
-}
-
 function readLegacyCollapsedStoredValue(threadId: string): string | null {
   if (typeof window === "undefined") {
     return null;

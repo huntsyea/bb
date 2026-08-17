@@ -522,7 +522,6 @@ function createProps({
     hasPendingInteraction,
     header: <StatefulConversationHeader />,
     isBoundedPane: false,
-    isConversationCollapsed: false,
     isWorkMode,
     isMetadataLoading: false,
     isSecondaryPanelOpen,
@@ -550,7 +549,6 @@ function createProps({
       workspaceStatus: undefined,
       workspaceStatusError: null,
     } as ThreadDetailSecondaryContentProps["metadata"],
-    onToggleConversationCollapse: noop,
     onToggleSecondaryPanel: noop,
     onToggleWorkMode,
     renderHostedPanel: (panel) => panel,
@@ -1369,18 +1367,5 @@ describe("ThreadDetailSecondaryContent compact Work mode", () => {
     // Re-entering does not restore the previous open state, and nothing opens
     // the drawer except its own control.
     expect(drawerShell().getAttribute("data-open")).toBe("false");
-  });
-
-  // The drawer half of the reduced-motion requirement cannot be asserted here:
-  // this suite mocks the drawer shell, and the suppression lives in vaul's own
-  // markup. It is covered against the real drawer in
-  // `src/components/ui/drawer.reducedMotion.test.tsx`.
-  it("suppresses the conversation collapse transition under reduced motion", () => {
-    renderCompactWorkMode();
-
-    const conversation = screen
-      .getByTestId("thread-timeline-pane")
-      .closest('[data-thread-region="conversation"]');
-    expect(conversation?.className).toContain("motion-reduce:transition-none");
   });
 });

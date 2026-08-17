@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  resolveConversationCollapseControl,
   resolveShowPanelControl,
   resolveWorkModeControl,
 } from "./panelToggleControlState";
@@ -68,36 +67,3 @@ describe("resolveWorkModeControl", () => {
   });
 });
 
-describe("resolveConversationCollapseControl", () => {
-  it("collapses the conversation when it is shown", () => {
-    const onToggleConversationCollapse = vi.fn();
-    const state = resolveConversationCollapseControl({
-      isConversationCollapsed: false,
-      onToggleConversationCollapse,
-    });
-
-    expect(state.action).toBe("hide-conversation");
-    expect(state.label).toBe("Hide Conversation");
-    expect(state.isPressed).toBe(false);
-    expect(state.iconName).toBe("Maximize2");
-
-    state.onClick();
-    expect(onToggleConversationCollapse).toHaveBeenCalledTimes(1);
-  });
-
-  it("restores the conversation when it is collapsed", () => {
-    const onToggleConversationCollapse = vi.fn();
-    const state = resolveConversationCollapseControl({
-      isConversationCollapsed: true,
-      onToggleConversationCollapse,
-    });
-
-    expect(state.action).toBe("show-conversation");
-    expect(state.label).toBe("Show Conversation");
-    expect(state.isPressed).toBe(true);
-    expect(state.iconName).toBe("Minimize2");
-
-    state.onClick();
-    expect(onToggleConversationCollapse).toHaveBeenCalledTimes(1);
-  });
-});

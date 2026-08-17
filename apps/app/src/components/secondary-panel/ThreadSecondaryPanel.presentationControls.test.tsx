@@ -37,8 +37,6 @@ function renderPanel(args: {
     onToggle: () => void;
     pendingIndicatorId: string;
   };
-  isConversationCollapsed: boolean;
-  onToggleConversationCollapse: () => void;
   isWorkMode?: boolean;
   onToggleWorkMode?: () => void;
   renderAsDrawer?: boolean;
@@ -72,10 +70,7 @@ function renderPanel(args: {
 
 describe("ThreadSecondaryPanel resize handle", () => {
   it("uses a real 12px hit target centered over the resize seam", () => {
-    const view = renderPanel({
-      isConversationCollapsed: false,
-      onToggleConversationCollapse: noop,
-    });
+    const view = renderPanel({});
 
     const handle = view.getByRole("separator", {
       name: "Resize thread and right panel",
@@ -99,8 +94,6 @@ describe("ThreadSecondaryPanel resize handle", () => {
 describe("ThreadSecondaryPanel Work mode control", () => {
   it("keeps Enter Work mode before Hide right panel in the trailing toolbar", () => {
     const view = renderPanel({
-      isConversationCollapsed: false,
-      onToggleConversationCollapse: noop,
       onToggleWorkMode: noop,
     });
 
@@ -119,8 +112,6 @@ describe("ThreadSecondaryPanel Work mode control", () => {
   it("enters Work mode from Conversation mode", () => {
     const onToggleWorkMode = vi.fn();
     const view = renderPanel({
-      isConversationCollapsed: false,
-      onToggleConversationCollapse: noop,
       onToggleWorkMode,
     });
 
@@ -135,8 +126,6 @@ describe("ThreadSecondaryPanel Work mode control", () => {
     const onToggleWorkMode = vi.fn();
     const view = renderPanel({
       canEnterWorkMode: false,
-      isConversationCollapsed: false,
-      onToggleConversationCollapse: noop,
       onToggleWorkMode,
     });
 
@@ -149,9 +138,7 @@ describe("ThreadSecondaryPanel Work mode control", () => {
 
   it("renames the hide control while the work surface is primary", () => {
     const view = renderPanel({
-      isConversationCollapsed: false,
       isWorkMode: true,
-      onToggleConversationCollapse: noop,
       onToggleWorkMode: noop,
     });
 
@@ -167,9 +154,7 @@ describe("ThreadSecondaryPanel Work mode control", () => {
   it("restores Conversation mode from the same slot", () => {
     const onToggleWorkMode = vi.fn();
     const view = renderPanel({
-      isConversationCollapsed: false,
       isWorkMode: true,
-      onToggleConversationCollapse: noop,
       onToggleWorkMode,
     });
 
@@ -182,8 +167,6 @@ describe("ThreadSecondaryPanel Work mode control", () => {
 
   it("carries the layout owner's id so focus can survive the enter/restore swap", () => {
     const view = renderPanel({
-      isConversationCollapsed: false,
-      onToggleConversationCollapse: noop,
       onToggleWorkMode: noop,
       workModeToggleId: "thread-work-mode-toggle-pane-1",
     });
@@ -195,13 +178,11 @@ describe("ThreadSecondaryPanel Work mode control", () => {
 
   /**
    * The compact drawer holds the work surface before Work mode promotes it to
-   * the page, so the Work mode control is the only way in — the conversation
-   * collapse fallback is wide-layout-only and stays out of the drawer.
+   * the page, so the Work mode control is the only way in. Work mode is now the
+   * only presentation state, so a drawer without it shows nothing in that slot.
    */
   it("keeps the Work mode control in the compact drawer and nothing in its place", () => {
     const offeredView = renderPanel({
-      isConversationCollapsed: false,
-      onToggleConversationCollapse: noop,
       onToggleWorkMode: noop,
       renderAsDrawer: true,
     });
@@ -212,26 +193,16 @@ describe("ThreadSecondaryPanel Work mode control", () => {
     cleanup();
 
     const withoutWorkModeView = renderPanel({
-      isConversationCollapsed: false,
-      onToggleConversationCollapse: noop,
       renderAsDrawer: true,
     });
     expect(
-      withoutWorkModeView.queryByRole("button", { name: "Enter Work mode" }),
-    ).toBeNull();
-    expect(
-      withoutWorkModeView.queryByRole("button", { name: "Hide Conversation" }),
-    ).toBeNull();
-    expect(
-      withoutWorkModeView.queryByRole("button", { name: "Show Conversation" }),
+      withoutWorkModeView.queryByTestId("thread-work-mode-toggle"),
     ).toBeNull();
   });
 
   it("operates from the keyboard in both states", () => {
     const onEnter = vi.fn();
     const enterView = renderPanel({
-      isConversationCollapsed: false,
-      onToggleConversationCollapse: noop,
       onToggleWorkMode: onEnter,
     });
     pressWithKeyboard(
@@ -243,9 +214,7 @@ describe("ThreadSecondaryPanel Work mode control", () => {
 
     const onRestore = vi.fn();
     const restoreView = renderPanel({
-      isConversationCollapsed: false,
       isWorkMode: true,
-      onToggleConversationCollapse: noop,
       onToggleWorkMode: onRestore,
     });
     pressWithKeyboard(
@@ -274,9 +243,7 @@ describe("ThreadSecondaryPanel conversation drawer control", () => {
         pendingIndicatorId: "thread-conversation-pending-indicator-test-pane",
         ...drawer,
       },
-      isConversationCollapsed: false,
       isWorkMode: true,
-      onToggleConversationCollapse: noop,
       onToggleWorkMode: noop,
       withoutResizablePanel: true,
     });
@@ -340,9 +307,7 @@ describe("ThreadSecondaryPanel conversation drawer control", () => {
 
   it("stays out of the panel toolbar outside compact Work mode", () => {
     const view = renderPanel({
-      isConversationCollapsed: false,
       isWorkMode: true,
-      onToggleConversationCollapse: noop,
       onToggleWorkMode: noop,
     });
 
@@ -350,55 +315,5 @@ describe("ThreadSecondaryPanel conversation drawer control", () => {
       view.queryByRole("button", { name: CONVERSATION_DRAWER_CONTROL_LABEL }),
     ).toBeNull();
     expect(view.queryByRole("status")).toBeNull();
-  });
-});
-
-// Hosted split panes whose Thread has no eligible work surface keep the
-// resource-only conversation collapse.
-describe("ThreadSecondaryPanel conversation collapse control", () => {
-  it("keeps Hide Conversation before Hide right panel in the trailing toolbar", () => {
-    const view = renderPanel({
-      isConversationCollapsed: false,
-      onToggleConversationCollapse: noop,
-    });
-
-    const collapseControl = view.getByRole("button", {
-      name: "Hide Conversation",
-    });
-    const hideControl = view.getByRole("button", {
-      name: "Hide right panel",
-    });
-    expect(
-      collapseControl.compareDocumentPosition(hideControl) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).not.toBe(0);
-  });
-
-  it("expands the panel while the conversation is shown", () => {
-    const onToggleConversationCollapse = vi.fn();
-    const view = renderPanel({
-      isConversationCollapsed: false,
-      onToggleConversationCollapse,
-    });
-
-    const control = view.getByRole("button", { name: "Hide Conversation" });
-    expect(control.getAttribute("aria-pressed")).toBe("false");
-
-    fireEvent.click(control);
-    expect(onToggleConversationCollapse).toHaveBeenCalledTimes(1);
-  });
-
-  it("restores the conversation from the same slot while it is collapsed", () => {
-    const onToggleConversationCollapse = vi.fn();
-    const view = renderPanel({
-      isConversationCollapsed: true,
-      onToggleConversationCollapse,
-    });
-
-    const control = view.getByRole("button", { name: "Show Conversation" });
-    expect(control.getAttribute("aria-pressed")).toBe("true");
-
-    fireEvent.click(control);
-    expect(onToggleConversationCollapse).toHaveBeenCalledTimes(1);
   });
 });

@@ -178,10 +178,6 @@ export function SplitWorkspaceSecondaryPanelHost({
       group.setLayout([MAIN_PANEL_OPEN_SIZE_PERCENT, 0]);
       return;
     }
-    if (model?.isMainCollapsed) {
-      group.setLayout([0, MAIN_PANEL_OPEN_SIZE_PERCENT]);
-      return;
-    }
     group.setLayout([
       MAIN_PANEL_OPEN_SIZE_PERCENT - panelWidthPercent,
       panelWidthPercent,
@@ -191,7 +187,6 @@ export function SplitWorkspaceSecondaryPanelHost({
     isOpen,
     isPaneMaximized,
     isWorkSurfacePrimary,
-    model?.isMainCollapsed,
     panelWidthPercent,
   ]);
 
@@ -317,20 +312,14 @@ export function SplitWorkspaceSecondaryPanelHost({
         >
           <Panel
             id="split-workspace-main-panel"
-            // The conversation rail always stays visible; only the ordinary
-            // panel layout collapses the main panel behind a full-width panel.
-            collapsible={!isWorkSurfacePrimary}
-            collapsedSize={0}
             defaultSize={
               isWorkSurfacePrimary
                 ? conversationRailWidthPercent
                 : isPaneMaximized
                   ? MAIN_PANEL_OPEN_SIZE_PERCENT
-                  : model?.isMainCollapsed
-                    ? 0
-                    : isOpen
-                      ? MAIN_PANEL_OPEN_SIZE_PERCENT - panelWidthPercent
-                      : MAIN_PANEL_OPEN_SIZE_PERCENT
+                  : isOpen
+                    ? MAIN_PANEL_OPEN_SIZE_PERCENT - panelWidthPercent
+                    : MAIN_PANEL_OPEN_SIZE_PERCENT
             }
             minSize={
               isWorkSurfacePrimary
