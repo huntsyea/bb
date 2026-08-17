@@ -80,16 +80,18 @@ vi.mock("react-resizable-panels", async () => {
 
   const Panel = ({
     children,
+    className,
     order,
     style,
   }: {
     children?: ReactNode;
+    className?: string;
     order?: number;
     style?: CSSProperties;
   }) =>
     React.createElement(
       "div",
-      { "data-panel-order": order, "data-testid": "panel", style },
+      { className, "data-panel-order": order, "data-testid": "panel", style },
       children,
     );
 
@@ -357,6 +359,7 @@ interface QueuedAnimationFrames {
 
 interface RenderThreadDetailArgs {
   arrangement?: ThreadSurfaceArrangement;
+  canEnterWorkMode?: boolean;
   hasPendingInteraction?: boolean;
   isFocusedHosted?: boolean;
   isCompactViewport: boolean;
@@ -507,6 +510,7 @@ function StatefulConversationHeader() {
 
 function createProps({
   arrangement = "conversation-primary",
+  canEnterWorkMode = true,
   hasPendingInteraction = false,
   isSecondaryPanelOpen,
   isWorkMode = false,
@@ -554,6 +558,7 @@ function createProps({
     renderHostedPanel: (panel) => panel,
     secondaryPanel: {
       activeTab: null,
+      canEnterWorkMode,
       canUseGitUi: false,
       fileTabs: [],
       isBrowserTabActive: true,
@@ -600,6 +605,7 @@ function renderThreadDetail(args: RenderThreadDetailArgs) {
         <ThreadDetailSecondaryContent
           {...createProps({
             arrangement: renderArgs.arrangement,
+            canEnterWorkMode: renderArgs.canEnterWorkMode,
             hasPendingInteraction: renderArgs.hasPendingInteraction,
             isSecondaryPanelOpen: renderArgs.isSecondaryPanelOpen,
             isWorkMode: renderArgs.isWorkMode,
@@ -626,6 +632,7 @@ function renderThreadDetail(args: RenderThreadDetailArgs) {
             <ThreadDetailSecondaryContent
               {...createProps({
                 arrangement: renderArgs.arrangement,
+                canEnterWorkMode: renderArgs.canEnterWorkMode,
                 hasPendingInteraction: renderArgs.hasPendingInteraction,
                 isSecondaryPanelOpen: renderArgs.isSecondaryPanelOpen,
                 isWorkMode: renderArgs.isWorkMode,
@@ -714,6 +721,48 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
     ).toBe("button");
   });
 
+  /**
+   * Work mode is the only presentation state, and a hosted pane whose panel
+   * holds only ineligible tabs cannot enter it — so that pane's toolbar shows
+   * no presentation control at all. The host still offers "Hide right panel",
+   * so the panel is not stranded.
+   */
+  it("shows no presentation control in a hosted pane with no eligible work surface", () => {
+    renderThreadDetail({
+      canEnterWorkMode: false,
+      isCompactViewport: false,
+      isFocusedHosted: true,
+      isSecondaryPanelOpen: true,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+
+    if (publishedHostedPanel === null) {
+      throw new Error("Expected the focused pane to publish its panel model");
+    }
+    render(<>{publishedHostedPanel.panel}</>);
+    expect(screen.queryByTestId("thread-work-mode-toggle")).toBeNull();
+  });
+
+  it("keeps the presentation control in a hosted pane that can enter Work mode", () => {
+    renderThreadDetail({
+      canEnterWorkMode: true,
+      isCompactViewport: false,
+      isFocusedHosted: true,
+      isSecondaryPanelOpen: true,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+
+    if (publishedHostedPanel === null) {
+      throw new Error("Expected the focused pane to publish its panel model");
+    }
+    render(<>{publishedHostedPanel.panel}</>);
+    expect(
+      screen.getByTestId("thread-work-mode-toggle").getAttribute("aria-label"),
+    ).toBe("Enter Work mode");
+  });
+
   it("keeps the thread header inside the timeline column beside the side panel", () => {
     renderThreadDetail({
       isCompactViewport: false,
@@ -729,6 +778,28 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
     expect(timelinePanel.contains(sidePanel)).toBe(false);
     expect(panelGroup.contains(timelinePanel)).toBe(true);
     expect(panelGroup.contains(sidePanel)).toBe(true);
+  });
+
+  /**
+   * Entering Work mode animates the timeline panel down to the conversation
+   * rail width. That size change is decorative — both modes settle at the same
+   * layout — so it must drop out under `prefers-reduced-motion`. The drawer
+   * half of the same requirement lives in vaul's markup and is covered in
+   * `src/components/ui/drawer.reducedMotion.test.tsx`.
+   */
+  it("suppresses the Work mode size transition under reduced motion", () => {
+    renderThreadDetail({
+      isCompactViewport: false,
+      isSecondaryPanelOpen: true,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+
+    const timelinePanel = screen.getByTestId("panel");
+    expect(timelinePanel.className).toContain(
+      "transition-[flex-grow,flex-basis]",
+    );
+    expect(timelinePanel.className).toContain("motion-reduce:transition-none");
   });
 
   it("does not promote when a resource opens in Conversation mode", () => {

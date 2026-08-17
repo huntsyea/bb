@@ -40,6 +40,7 @@ function renderPanel(args: {
   isWorkMode?: boolean;
   onToggleWorkMode?: () => void;
   renderAsDrawer?: boolean;
+  showWorkModeControl?: boolean;
   withoutResizablePanel?: boolean;
   workModeToggleId?: string;
 }) {
@@ -198,6 +199,27 @@ describe("ThreadSecondaryPanel Work mode control", () => {
     expect(
       withoutWorkModeView.queryByTestId("thread-work-mode-toggle"),
     ).toBeNull();
+  });
+
+  /**
+   * A hosted split pane whose panel holds only ineligible tabs (the default
+   * thread-info tab, for one) cannot enter Work mode, so the presentation slot
+   * stays empty — the panel is still reachable through Hide right panel.
+   */
+  it("renders no presentation control for a hosted pane with no eligible surface", () => {
+    const view = renderPanel({
+      canEnterWorkMode: false,
+      onToggleWorkMode: noop,
+      showWorkModeControl: false,
+    });
+
+    expect(view.queryByTestId("thread-work-mode-toggle")).toBeNull();
+    expect(
+      view.queryByRole("button", { name: "Enter Work mode" }),
+    ).toBeNull();
+    expect(
+      view.getByRole("button", { name: "Hide right panel" }),
+    ).not.toBeNull();
   });
 
   it("operates from the keyboard in both states", () => {
