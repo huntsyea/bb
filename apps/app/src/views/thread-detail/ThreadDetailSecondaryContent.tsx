@@ -1,4 +1,5 @@
 import {
+  cloneElement,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -15,15 +16,24 @@ import {
 } from "react-resizable-panels";
 import { ResponsiveDrawerShell } from "@bb/shared-ui/responsive-overlay";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
+import { useThreadSecondaryPanelDrawerVisibility } from "./useThreadSecondaryPanelVisibility";
 import { Skeleton } from "@bb/shared-ui/skeleton";
 import { DETAIL_GRID_CLASS } from "@/components/ui/detail-card.js";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { cn } from "@bb/shared-ui/lib/utils";
 import { ThreadSecondaryPanel } from "@/components/secondary-panel/ThreadSecondaryPanel";
 import { useDrawerPanelRealization } from "@/components/secondary-panel/useDrawerPanelRealization";
 import {
+  conversationRailWidthPercentAtom,
   secondaryPanelWidthPercentAtom,
+  threadSecondaryPanelResizingAtom,
 } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
+import {
+  CONVERSATION_RAIL_MIN_SIZE_PERCENT,
+  constrainConversationRailWidthPercent,
+  resolveConversationRailWidthUpdate,
+  resolveThreadWorkModeLayoutSizes,
+} from "./threadWorkMode";
 import {
   ThreadMetadataCard,
   ThreadMetadataContent,
@@ -33,6 +43,7 @@ import {
 import { useThreads } from "@/hooks/queries/thread-queries";
 import { ThreadTimelinePane } from "./ThreadTimelinePane";
 import { PANEL_COLLAPSE_TRANSITION_CLASS } from "@/components/secondary-panel/panelTransitionTokens";
+import { resolveConversationPendingIndicatorElementId } from "@/components/secondary-panel/panelToggleControlState";
 import { dispatchBrowserViewBoundsSync } from "@/lib/browser-view-bounds-sync";
 import {
   usePaneContext,
@@ -43,9 +54,12 @@ import {
   PluginComposerHostScopeProvider,
   usePluginComposerHost,
 } from "@/components/plugin/plugin-composer-host";
+import {
+  ThreadSurfaceHost,
+  type ThreadSurfaceArrangement,
+} from "./ThreadSurfaceHost";
 
 const CLOSED_TIMELINE_PANEL_SIZE_PERCENT = 100;
-const COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT = 0;
 const TIMELINE_PANEL_MIN_SIZE_PERCENT = 30;
 
 type ThreadTimelinePaneProps = Omit<
@@ -56,8 +70,8 @@ type ThreadSecondaryPanelProps = Omit<
   ComponentProps<typeof ThreadSecondaryPanel>,
   | "metadataContent"
   | "renderAsDrawer"
-  | "isConversationCollapsed"
-  | "onToggleConversationCollapse"
+  | "isWorkMode"
+  | "onToggleWorkMode"
   | "browserDeck"
 > & {
   renderBrowserDeck?: (args: {
@@ -70,7 +84,13 @@ interface ThreadDetailSecondaryContentProps {
   header: ReactNode;
   isMetadataLoading: boolean;
   isSecondaryPanelOpen: boolean;
-  isConversationCollapsed: boolean;
+  isWorkMode: boolean;
+  /**
+   * True while an approval or a question is waiting in the conversation. In
+   * compact Work mode the conversation is behind a drawer that never opens on
+   * its own, so its control carries a persistent indicator instead.
+   */
+  hasPendingInteraction: boolean;
   /**
    * True when rendering inside a bounded split card. Bounded panes skip the
    * page-bleed negative margins below — the card supplies the boundary, so
@@ -80,10 +100,11 @@ interface ThreadDetailSecondaryContentProps {
    */
   isBoundedPane: boolean;
   onToggleSecondaryPanel: () => void;
-  onToggleConversationCollapse: () => void;
+  onToggleWorkMode: () => void;
   renderHostedPanel: (panel: ReactNode) => ReactNode;
   metadata: ThreadMetadataContentProps;
   secondaryPanel: ThreadSecondaryPanelProps;
+  surfaceArrangement: ThreadSurfaceArrangement;
   timeline: ThreadTimelinePaneProps;
 }
 
@@ -102,13 +123,15 @@ function ThreadDetailSecondaryContentBody({
   header,
   isMetadataLoading,
   isSecondaryPanelOpen,
-  isConversationCollapsed,
+  isWorkMode,
+  hasPendingInteraction,
   isBoundedPane,
   onToggleSecondaryPanel,
-  onToggleConversationCollapse,
+  onToggleWorkMode,
   renderHostedPanel,
   metadata,
   secondaryPanel,
+  surfaceArrangement,
   timeline,
 }: ThreadDetailSecondaryContentProps) {
   const { isFocused, paneId, secondaryPanelHost } = usePaneContext();
@@ -120,32 +143,72 @@ function ThreadDetailSecondaryContentBody({
   const persistedSecondaryWidthPercent = useAtomValue(
     secondaryPanelWidthPercentAtom,
   );
-  // Collapsing the conversation only makes sense on a wide viewport with the
-  // secondary panel open — there is otherwise nothing to expand into.
-  const canCollapseConversation = isSecondaryPanelOpen && !renderAsDrawer;
-  const isConversationCollapsedActive =
-    canCollapseConversation && isConversationCollapsed;
+  const conversationRailWidthPercent = useAtomValue(
+    conversationRailWidthPercentAtom,
+  );
+  const setConversationRailWidthPercent = useSetAtom(
+    conversationRailWidthPercentAtom,
+  );
+  const isSecondaryPanelResizing = useAtomValue(
+    threadSecondaryPanelResizingAtom,
+  );
+  const isStandaloneLayout = secondaryPanelHost === null;
+  // `isWorkMode` already carries the caller's eligibility gate, which for a
+  // hosted pane includes holding the whole workspace. A hosted pane that
+  // reaches this point therefore renders the same work-surface-primary layout
+  // as the standalone surface — the conversation rail exists once, in the
+  // maximized pane, never in every visible split pane.
+  const isWideWorkModeActive =
+    isWorkMode && isSecondaryPanelOpen && !renderAsDrawer;
+  /**
+   * Compact Work mode inverts the drawer relationship: the panel that was the
+   * drawer's content is promoted to the page, and the complete conversation
+   * takes the drawer. `isSecondaryPanelOpen` stays true throughout — it is
+   * what makes a work surface available to promote — so restoring returns the
+   * user to the open panel drawer they came from.
+   *
+   * The `isStandaloneLayout` term is defensive, not load-bearing: a hosted pane
+   * cannot be compact today, because `useSplitWorkspaceActive` turns the split
+   * workspace off on compact viewports and the route renders as a single page
+   * surface. Unlike the wide condition above, the prop gate alone does not
+   * imply standalone here — it admits a maximized hosted pane — so if splits
+   * were ever enabled on compact this branch would publish a
+   * `withoutResizablePanel` panel into the host PanelGroup and render a
+   * conversation drawer toggle whose drawer JSX sits behind the hosted early
+   * return.
+   */
+  const isCompactWorkModeActive =
+    isStandaloneLayout && isWorkMode && isSecondaryPanelOpen && renderAsDrawer;
+  const isWorkModeActive = isWideWorkModeActive || isCompactWorkModeActive;
+  /** The compact drawer holds the panel everywhere except compact Work mode. */
+  const rendersPanelInDrawer = renderAsDrawer && !isCompactWorkModeActive;
+  const layoutSizes = resolveThreadWorkModeLayoutSizes({
+    isWorkMode: isWorkModeActive,
+    isSecondaryPanelOpen: isSecondaryPanelOpen && !renderAsDrawer,
+    conversationRailWidthPercent,
+    secondaryPanelWidthPercent: persistedSecondaryWidthPercent,
+  });
   const [isCompactDrawerContentSettled, setIsCompactDrawerContentSettled] =
     useState(false);
   const { isPanelRealized, realizePanel } = useDrawerPanelRealization({
     isDrawerOpen: isSecondaryPanelOpen,
-    rendersAsDrawer: renderAsDrawer,
+    rendersAsDrawer: rendersPanelInDrawer,
   });
   const compactDrawerContentSettleFrameRef = useRef<number | null>(null);
   const compactDrawerContentSettleGenerationRef = useRef(0);
   const compactDrawerContentSettleStateRef = useRef({
     isSecondaryPanelOpen,
-    renderAsDrawer,
+    rendersPanelInDrawer,
     threadId: stableTimeline.threadId,
   });
 
   useLayoutEffect(() => {
     compactDrawerContentSettleStateRef.current = {
       isSecondaryPanelOpen,
-      renderAsDrawer,
+      rendersPanelInDrawer,
       threadId: stableTimeline.threadId,
     };
-  }, [isSecondaryPanelOpen, renderAsDrawer, stableTimeline.threadId]);
+  }, [isSecondaryPanelOpen, rendersPanelInDrawer, stableTimeline.threadId]);
 
   const cancelCompactDrawerContentSettleFrame = useCallback(() => {
     compactDrawerContentSettleGenerationRef.current += 1;
@@ -162,7 +225,7 @@ function ThreadDetailSecondaryContentBody({
   }, [
     cancelCompactDrawerContentSettleFrame,
     isSecondaryPanelOpen,
-    renderAsDrawer,
+    rendersPanelInDrawer,
     stableTimeline.threadId,
   ]);
 
@@ -179,7 +242,10 @@ function ThreadDetailSecondaryContentBody({
         return;
       }
       const currentState = compactDrawerContentSettleStateRef.current;
-      if (!currentState.isSecondaryPanelOpen || !currentState.renderAsDrawer) {
+      if (
+        !currentState.isSecondaryPanelOpen ||
+        !currentState.rendersPanelInDrawer
+      ) {
         return;
       }
 
@@ -195,7 +261,7 @@ function ThreadDetailSecondaryContentBody({
               requestGeneration ||
             latestState.threadId !== requestThreadId ||
             !latestState.isSecondaryPanelOpen ||
-            !latestState.renderAsDrawer
+            !latestState.rendersPanelInDrawer
           ) {
             return;
           }
@@ -208,7 +274,7 @@ function ThreadDetailSecondaryContentBody({
               requestGeneration &&
             stateAfterSync.threadId === requestThreadId &&
             stateAfterSync.isSecondaryPanelOpen &&
-            stateAfterSync.renderAsDrawer
+            stateAfterSync.rendersPanelInDrawer
           ) {
             setIsCompactDrawerContentSettled(true);
             realizePanel();
@@ -218,9 +284,56 @@ function ThreadDetailSecondaryContentBody({
     },
     [cancelCompactDrawerContentSettleFrame, realizePanel],
   );
-  const canShowNativeBrowserView = renderAsDrawer
+  // In compact Work mode the panel is the page, not drawer content, so it takes
+  // the same readiness rule as the wide layout instead of waiting on a sheet
+  // animation that no longer wraps it.
+  const canShowNativeBrowserView = rendersPanelInDrawer
     ? isSecondaryPanelOpen && isCompactDrawerContentSettled
     : isSecondaryPanelOpen && (secondaryPanelHost === null || isFocused);
+  // The conversation drawer is opened only by its control: this hook has no
+  // auto-open path, and it closes itself when compact Work mode ends or the
+  // thread changes, so leaving Work mode never strands an open sheet.
+  const conversationDrawerVisibility = useThreadSecondaryPanelDrawerVisibility({
+    isCompactViewport: isCompactWorkModeActive,
+    threadId: stableTimeline.threadId,
+  });
+  const { closeDrawer: closeConversationDrawer } = conversationDrawerVisibility;
+  const isConversationDrawerOpen = conversationDrawerVisibility.isDrawerVisible;
+  const toggleConversationDrawer = conversationDrawerVisibility.toggleDrawer;
+  // The Work mode control lives in a portal in compact mode (drawer content),
+  // so an id is the only handle that survives the promotion/restoration swap.
+  const workModeToggleElementId = `thread-work-mode-toggle-${paneId}`;
+  const conversationDrawerControl = useMemo(
+    () => ({
+      hasPendingInteraction,
+      isOpen: isConversationDrawerOpen,
+      onToggle: toggleConversationDrawer,
+      pendingIndicatorId: resolveConversationPendingIndicatorElementId(paneId),
+    }),
+    [
+      hasPendingInteraction,
+      isConversationDrawerOpen,
+      paneId,
+      toggleConversationDrawer,
+    ],
+  );
+  // Promotion and restoration move the work surface between the drawer portal
+  // and the page, which unmounts whatever held focus. Put focus back on the
+  // control that performed the change so keyboard operation continues from
+  // there. If the drawer's own focus management already claimed focus, or the
+  // user has moved on, leave it alone.
+  const didMountWorkModeFocusRef = useRef(false);
+  useEffect(() => {
+    if (!didMountWorkModeFocusRef.current) {
+      didMountWorkModeFocusRef.current = true;
+      return;
+    }
+    const activeElement = document.activeElement;
+    if (activeElement !== null && activeElement !== document.body) {
+      return;
+    }
+    document.getElementById(workModeToggleElementId)?.focus();
+  }, [isCompactWorkModeActive, workModeToggleElementId]);
   const { renderBrowserDeck, ...threadSecondaryPanelProps } =
     stableSecondaryPanel;
   const browserDeck = useMemo(
@@ -237,27 +350,34 @@ function ThreadDetailSecondaryContentBody({
   useEffect(() => {
     persistedSecondaryWidthRef.current = persistedSecondaryWidthPercent;
   }, [persistedSecondaryWidthPercent]);
-  const didMountConversationCollapseRef = useRef(false);
+  const conversationRailWidthRef = useRef(conversationRailWidthPercent);
+  useEffect(() => {
+    conversationRailWidthRef.current = conversationRailWidthPercent;
+  }, [conversationRailWidthPercent]);
+  const didMountPresentationLayoutRef = useRef(false);
   useLayoutEffect(() => {
     // Initial mount is handled by each panel's defaultSize; only animate when
-    // the collapse state changes afterwards. A layout effect keeps the
+    // the presentation state changes afterwards. A layout effect keeps the
     // secondary panel's lifted max size and the new layout in the same commit,
     // avoiding a flicker through the clamped 70% intermediate.
-    if (!didMountConversationCollapseRef.current) {
-      didMountConversationCollapseRef.current = true;
+    if (!didMountPresentationLayoutRef.current) {
+      didMountPresentationLayoutRef.current = true;
       return;
     }
     const group = horizontalPanelGroupRef.current;
     if (group === null || renderAsDrawer || !isSecondaryPanelOpen) {
       return;
     }
-    if (isConversationCollapsedActive) {
-      group.setLayout([COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT, 100]);
-    } else {
-      const secondaryWidth = persistedSecondaryWidthRef.current;
-      group.setLayout([100 - secondaryWidth, secondaryWidth]);
+    if (isWorkModeActive) {
+      const railWidth = constrainConversationRailWidthPercent(
+        conversationRailWidthRef.current,
+      );
+      group.setLayout([100 - railWidth, railWidth]);
+      return;
     }
-  }, [isConversationCollapsedActive, isSecondaryPanelOpen, renderAsDrawer]);
+    const secondaryWidth = persistedSecondaryWidthRef.current;
+    group.setLayout([100 - secondaryWidth, secondaryWidth]);
+  }, [isSecondaryPanelOpen, isWorkModeActive, renderAsDrawer]);
 
   // Mirror ForksRow's query (deduped by react-query) so the visibility gate
   // accounts for the lazily-fetched Forks row.
@@ -284,17 +404,32 @@ function ThreadDetailSecondaryContentBody({
       ),
     [hasForks, isMetadataLoading, stableMetadata],
   );
+  // A hosted pane with no eligible work surface offers no Work mode, so its
+  // panel toolbar shows no presentation control at all; the host's "Hide right
+  // panel" control and the resize handle remain. The standalone surface always
+  // shows the control — on compact too, where it is what promotes this panel to
+  // the page — and disables it while there is nothing to promote.
+  const showsWorkModeControl =
+    isStandaloneLayout || threadSecondaryPanelProps.canEnterWorkMode;
   const inlineSecondaryPanelContent = useMemo(
     () =>
-      !renderAsDrawer ? (
+      !rendersPanelInDrawer ? (
         <ThreadSecondaryPanel
           {...threadSecondaryPanelProps}
           browserDeck={browserDeck}
           renderAsDrawer={false}
-          isConversationCollapsed={isConversationCollapsedActive}
-          onToggleConversationCollapse={onToggleConversationCollapse}
+          // Promoted to the page in compact Work mode: no PanelGroup around it,
+          // so it must not emit a resize handle or a Panel wrapper.
+          withoutResizablePanel={isCompactWorkModeActive}
+          isWorkMode={isWorkModeActive}
+          onToggleWorkMode={showsWorkModeControl ? onToggleWorkMode : undefined}
+          workModeToggleId={workModeToggleElementId}
+          conversationDrawer={
+            isCompactWorkModeActive ? conversationDrawerControl : undefined
+          }
           // The owning thread or workspace header shows a closed panel. Once
-          // open, collapse belongs at the outer edge of the panel toolbar.
+          // open, the hide control belongs at the outer edge of the panel
+          // toolbar.
           inlinePanelToggle="button"
           // In the split-workspace host, panes' panels share one PanelGroup, so
           // each pane's Panel needs its own layout identity (see the prop doc).
@@ -303,27 +438,48 @@ function ThreadDetailSecondaryContentBody({
               ? undefined
               : `thread-detail-secondary-panel-${paneId}`
           }
+          // A hosted panel is a sibling of the split tree inside the window
+          // host's PanelGroup. In Work mode it swaps to the primary (left)
+          // side, and the split tree — the maximized pane's conversation —
+          // becomes the rail. Only the CSS order moves; the React children
+          // keep their positions, so nothing remounts.
+          resizablePanelLayout={
+            secondaryPanelHost !== null && isWorkModeActive
+              ? {
+                  panelOrder: 1,
+                  resizeHandleVisualOrder: 2,
+                  visualOrder: 1,
+                }
+              : undefined
+          }
           metadataContent={metadataContent}
         />
       ) : null,
     [
       browserDeck,
-      isConversationCollapsedActive,
+      conversationDrawerControl,
+      isCompactWorkModeActive,
+      isWorkModeActive,
       metadataContent,
-      onToggleConversationCollapse,
+      onToggleWorkMode,
       paneId,
-      renderAsDrawer,
+      rendersPanelInDrawer,
       secondaryPanelHost,
+      showsWorkModeControl,
       threadSecondaryPanelProps,
+      workModeToggleElementId,
     ],
   );
-  const drawerSecondaryPanelContent = renderAsDrawer ? (
+  // The compact panel drawer is where the user enters Work mode: its toolbar
+  // carries the enter control, which promotes this same panel to the page.
+  const drawerSecondaryPanelContent = rendersPanelInDrawer ? (
     <ThreadSecondaryPanel
       {...threadSecondaryPanelProps}
       browserDeck={browserDeck}
       renderAsDrawer={true}
-      isConversationCollapsed={false}
-      onToggleConversationCollapse={onToggleConversationCollapse}
+      isWorkMode={false}
+      onToggleWorkMode={showsWorkModeControl ? onToggleWorkMode : undefined}
+      workModeToggleId={workModeToggleElementId}
       metadataContent={metadataContent}
     />
   ) : null;
@@ -331,7 +487,6 @@ function ThreadDetailSecondaryContentBody({
     () => ({
       composerHost,
       contentKey: stableTimeline.threadId,
-      isMainCollapsed: isConversationCollapsedActive,
       isOpen: isSecondaryPanelOpen,
       panel: renderHostedPanel(inlineSecondaryPanelContent),
       onToggle: onToggleSecondaryPanel,
@@ -339,7 +494,6 @@ function ThreadDetailSecondaryContentBody({
     [
       composerHost,
       inlineSecondaryPanelContent,
-      isConversationCollapsedActive,
       isSecondaryPanelOpen,
       onToggleSecondaryPanel,
       renderHostedPanel,
@@ -348,19 +502,23 @@ function ThreadDetailSecondaryContentBody({
   );
   usePaneSecondaryPanelRegistration(secondaryPanelHost, hostedPanelModel);
 
+  // One conversation. It sits in the resizable Panel normally and moves into
+  // the drawer in compact Work mode — rendered once either way, never cloned.
+  const conversationRegion = (
+    <div
+      data-thread-region="conversation"
+      className="flex h-full min-h-0 min-w-0 flex-col"
+    >
+      {header}
+      <ThreadTimelinePane {...stableTimeline} footer={footer} />
+    </div>
+  );
+
   if (secondaryPanelHost !== null) {
     return (
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-clip">
         {header}
-        <div
-          data-conversation-collapsed={isConversationCollapsedActive}
-          inert={isConversationCollapsedActive}
-          className={cn(
-            "flex min-h-0 min-w-0 flex-1 flex-col transition-opacity",
-            PANEL_COLLAPSE_TRANSITION_CLASS,
-            isConversationCollapsedActive && "opacity-0",
-          )}
-        >
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <ThreadTimelinePane {...stableTimeline} footer={footer} />
         </div>
       </div>
@@ -369,77 +527,94 @@ function ThreadDetailSecondaryContentBody({
 
   return (
     <div
+      data-thread-mode={isWorkModeActive ? "work" : "conversation"}
       className={cn(
         "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-clip",
         !isBoundedPane && "-mx-4 -mb-4 -mt-4 md:-mx-5 md:-mb-5 md:-mt-5",
       )}
     >
       {/*
-        When collapsed we keep the resizable PanelGroup mounted: the timeline
-        lifts to 0% and the panel to 100% via the layout effect. Nothing
+        Work mode keeps this PanelGroup mounted: the layout effect resizes the
+        two panels in place and ThreadSurfaceHost only reorders them. Nothing
         unmounts, so the secondary panel's content (live iframes, parsed diffs,
-        scroll position) is never torn down and re-created when toggling
-        collapse. The panel header's own toggle restores the conversation.
+        scroll position) survives switching between the two modes.
       */}
       {/* PanelGroup sets an inline `height: 100%`, so it needs this flex-sized
           row to resolve against rather than the column that also holds the
           header. */}
       <div className="flex min-h-0 w-full min-w-0 flex-1">
-        <PanelGroup
-          // Thread-scoped panel state should mount at its saved size instead of
-          // animating from the previously selected thread's layout.
-          key={stableTimeline.threadId}
-          ref={horizontalPanelGroupRef}
-          direction="horizontal"
-          // Query container so the secondary panel can hold its content at the
-          // panel's open width in cqw and clip it into view instead of
-          // reflowing (see ThreadSecondaryPanel swipe mode).
-          className="@container h-full min-w-0 flex-1"
-          // react-resizable-panels sets an INLINE `overflow: hidden` on the group
-          // root, which is still programmatically scrollable. A `scrollIntoView`
-          // from the app-preview iframe (clicking an in-page `#anchor`) walks up
-          // and bumps this group's `scrollTop`, dragging the whole view out of
-          // place. `clip` makes it a non-scroll container.
-          style={{ overflow: "clip" }}
-        >
-          <Panel
-            id="thread-detail-timeline-panel"
-            collapsible
-            collapsedSize={COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT}
-            defaultSize={
-              isConversationCollapsedActive
-                ? COLLAPSED_TIMELINE_PANEL_SIZE_PERCENT
-                : isSecondaryPanelOpen && !renderAsDrawer
-                  ? 100 - persistedSecondaryWidthPercent
-                  : CLOSED_TIMELINE_PANEL_SIZE_PERCENT
-            }
-            minSize={TIMELINE_PANEL_MIN_SIZE_PERCENT}
-            order={1}
-            className={cn(
-              "min-w-0 overflow-clip transition-[flex-grow,flex-basis]",
-              PANEL_COLLAPSE_TRANSITION_CLASS,
-            )}
+        {isCompactWorkModeActive ? (
+          // Compact Work mode: the work surface *is* the page. No PanelGroup —
+          // there is nothing beside it to resize against.
+          inlineSecondaryPanelContent
+        ) : (
+          <PanelGroup
+            // Thread-scoped panel state should mount at its saved size instead of
+            // animating from the previously selected thread's layout.
+            key={stableTimeline.threadId}
+            ref={horizontalPanelGroupRef}
+            direction="horizontal"
+            // Query container so the secondary panel can hold its content at the
+            // panel's open width in cqw and clip it into view instead of
+            // reflowing (see ThreadSecondaryPanel swipe mode).
+            className="@container h-full min-w-0 flex-1"
+            // react-resizable-panels sets an INLINE `overflow: hidden` on the group
+            // root, which is still programmatically scrollable. A `scrollIntoView`
+            // from the app-preview iframe (clicking an in-page `#anchor`) walks up
+            // and bumps this group's `scrollTop`, dragging the whole view out of
+            // place. `clip` makes it a non-scroll container.
+            style={{ overflow: "clip" }}
           >
-            <div
-              data-conversation-collapsed={isConversationCollapsedActive}
-              // `inert` removes the hidden conversation (header, timeline,
-              // composer) from the tab order and a11y tree and blocks pointer
-              // events, so keyboard focus can't land in the invisible pane.
-              inert={isConversationCollapsedActive}
-              className={cn(
-                "flex h-full min-h-0 min-w-0 flex-col transition-opacity",
-                PANEL_COLLAPSE_TRANSITION_CLASS,
-                isConversationCollapsedActive && "opacity-0",
+            <ThreadSurfaceHost
+              arrangement={surfaceArrangement}
+              renderConversation={(layout) => (
+                <Panel
+                  id="thread-detail-timeline-panel"
+                  defaultSize={
+                    isSecondaryPanelOpen && !renderAsDrawer
+                      ? layoutSizes.conversationSizePercent
+                      : CLOSED_TIMELINE_PANEL_SIZE_PERCENT
+                  }
+                  minSize={
+                    isWorkModeActive
+                      ? CONVERSATION_RAIL_MIN_SIZE_PERCENT
+                      : TIMELINE_PANEL_MIN_SIZE_PERCENT
+                  }
+                  onResize={(size) => {
+                    const nextWidth = resolveConversationRailWidthUpdate({
+                      isWorkMode: isWorkModeActive,
+                      isUserResizing: isSecondaryPanelResizing,
+                      sizePercent: size,
+                    });
+                    if (nextWidth !== null) {
+                      setConversationRailWidthPercent(nextWidth);
+                    }
+                  }}
+                  order={layout.panelOrder}
+                  style={{ order: layout.visualOrder }}
+                  className={cn(
+                    "min-w-0 overflow-clip transition-[flex-grow,flex-basis]",
+                    PANEL_COLLAPSE_TRANSITION_CLASS,
+                  )}
+                >
+                  {conversationRegion}
+                </Panel>
               )}
-            >
-              {header}
-              <ThreadTimelinePane {...stableTimeline} footer={footer} />
-            </div>
-          </Panel>
-          {inlineSecondaryPanelContent}
-        </PanelGroup>
+              renderWorkSurface={(layout) =>
+                inlineSecondaryPanelContent === null
+                  ? null
+                  : cloneElement(inlineSecondaryPanelContent, {
+                      resizablePanelLayout: {
+                        ...layout,
+                        sizePercent: layoutSizes.workSurfaceSizePercent,
+                      },
+                    })
+              }
+            />
+          </PanelGroup>
+        )}
       </div>
-      {renderAsDrawer ? (
+      {rendersPanelInDrawer ? (
         <ResponsiveDrawerShell
           open={isSecondaryPanelOpen}
           onOpenChange={(open) => {
@@ -467,6 +642,24 @@ function ThreadDetailSecondaryContentBody({
             ) : (
               <ThreadMetadataLoadingSkeleton />
             )}
+          </div>
+        </ResponsiveDrawerShell>
+      ) : null}
+      {isCompactWorkModeActive ? (
+        <ResponsiveDrawerShell
+          open={isConversationDrawerOpen}
+          onOpenChange={(open) => {
+            // Only the drawer closes here. Work mode is a separate state, so
+            // dismissing the conversation leaves the work surface in place.
+            if (!open) closeConversationDrawer();
+          }}
+          srLabel="Conversation"
+          contentClassName="h-[92dvh] max-h-[92dvh]"
+          handleOnly
+          repositionInputs={false}
+        >
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {conversationRegion}
           </div>
         </ResponsiveDrawerShell>
       ) : null}

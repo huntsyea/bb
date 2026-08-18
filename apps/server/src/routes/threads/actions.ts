@@ -636,6 +636,15 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
     return context.json({ delivered });
   });
 
+  post(routes.workMode, (context, payload) => {
+    const publicThread = requirePublicThread(deps.db, context.req.param("id"));
+    const delivered = deps.hub.notifyThreadWorkMode(
+      { projectId: publicThread.projectId, threadId: publicThread.id },
+      payload.action,
+    );
+    return context.json({ delivered });
+  });
+
   post(routes.pin, (context) => {
     const publicThread = requirePublicThread(deps.db, context.req.param("id"));
     const thread = pinThread(deps.db, deps.hub, {

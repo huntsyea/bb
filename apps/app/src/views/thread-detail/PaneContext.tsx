@@ -43,6 +43,18 @@ export interface PaneContextValue {
   isMaximized: boolean;
   /** Toggles this pane between its split position and full-workspace display. */
   onToggleMaximize: (() => void) | null;
+  /**
+   * Claims (true) or releases (false) a Work-mode-owned maximization of this
+   * pane. Work mode needs the whole workspace, so a hosted pane entering it
+   * maximizes through the same non-destructive mechanism as the manual control
+   * and records that Work mode owns the change; releasing restores the split
+   * only when it still does. Claiming a pane the user had already maximized is
+   * a no-op, so leaving Work mode leaves that maximization alone.
+   *
+   * Null wherever no split can be maximized (the page and single-pane
+   * surfaces), mirroring {@link onToggleMaximize}.
+   */
+  setWorkModeMaximized: ((maximized: boolean) => void) | null;
   /** Moves this pane to one of the split workspace's supported edges. */
   onMoveToSide?: (side: SplitSide) => void;
   /**
@@ -86,7 +98,6 @@ export interface PaneSecondaryPanelViewModel {
    * visibility.
    */
   contentKey: string;
-  isMainCollapsed: boolean;
   isOpen: boolean;
   panel: ReactNode;
   onToggle: () => void;
@@ -206,6 +217,7 @@ export function DefaultPaneContextProvider({
       onRequestClose: null,
       isMaximized: false,
       onToggleMaximize: null,
+      setWorkModeMaximized: null,
       isBoundedPane: false,
       isTopRow: true,
       ownsWindowTopLeft: true,

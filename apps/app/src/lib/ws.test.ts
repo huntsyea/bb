@@ -261,4 +261,45 @@ describe("WebSocketManager thread-open signals", () => {
     expect(paneAction).toHaveBeenCalledWith(signal);
     expect(threadOpen).not.toHaveBeenCalled();
   });
+
+  it("routes typed thread work-mode actions separately", () => {
+    const { manager } = createConnectedManager();
+    const workMode = vi.fn();
+    const threadOpen = vi.fn();
+    manager.onThreadWorkMode(workMode);
+    manager.onThreadOpen(threadOpen);
+
+    const signal = {
+      type: "thread-work-mode",
+      projectId: "proj_1",
+      threadId: "thr_1",
+      action: "toggle",
+    } as const;
+    dispatchRaw(signal);
+
+    expect(workMode).toHaveBeenCalledWith(signal);
+    expect(threadOpen).not.toHaveBeenCalled();
+  });
+
+  it("leniently parses a thread work-mode signal with an unknown newer field", () => {
+    const { manager } = createConnectedManager();
+    const workMode = vi.fn();
+    manager.onThreadWorkMode(workMode);
+
+    dispatchRaw({
+      type: "thread-work-mode",
+      projectId: "proj_1",
+      threadId: "thr_1",
+      action: "enter",
+      // A field a newer server might add; the app must not choke on it.
+      surfaceHint: "diff-view",
+    });
+
+    expect(workMode).toHaveBeenCalledWith({
+      type: "thread-work-mode",
+      projectId: "proj_1",
+      threadId: "thr_1",
+      action: "enter",
+    });
+  });
 });

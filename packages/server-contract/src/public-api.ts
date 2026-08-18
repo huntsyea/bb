@@ -187,6 +187,8 @@ import type {
   ThreadOpenResponse,
   ThreadPaneActionRequest,
   ThreadPaneActionResponse,
+  ThreadWorkModeRequest,
+  ThreadWorkModeResponse,
   ProviderRateLimitRecoveryStatus,
   ThreadPendingInteractionsResponse,
   ThreadQueuedMessageListResponse,
@@ -294,6 +296,7 @@ import {
   threadListQuerySchema,
   threadOpenRequestSchema,
   threadPaneActionRequestSchema,
+  threadWorkModeRequestSchema,
   threadSearchQuerySchema,
   threadStorageContentQuerySchema,
   threadStorageFilesQuerySchema,
@@ -1118,6 +1121,14 @@ export const publicApiRoutes = {
         threadPaneActionRequestSchema,
       ),
       response: jsonResponse<ThreadPaneActionResponse>(),
+    }),
+    workMode: defineRoute({
+      path: "/threads/:id/work-mode",
+      method: "post",
+      request: jsonRequest<PathId, ThreadWorkModeRequest>(
+        threadWorkModeRequestSchema,
+      ),
+      response: jsonResponse<ThreadWorkModeResponse>(),
     }),
     tabs: defineRoute({
       path: "/threads/:id/tabs",

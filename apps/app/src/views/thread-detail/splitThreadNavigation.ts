@@ -64,6 +64,30 @@ export function paneContentRoute(content: PaneContent): string {
   });
 }
 
+/**
+ * The pane whose content `reconcileLayoutForContent` would swap out, or null
+ * when the route resolves to a pane that already holds it. Callers use this to
+ * release pane state belonging to the outgoing content *before* the swap runs,
+ * so the destination never mounts into it.
+ */
+export function paneReplacedByContent(
+  layout: SplitLayout | null,
+  content: PaneContent,
+): string | null {
+  if (layout === null) {
+    return null;
+  }
+  const existing = findPaneByContent(layout.root, content);
+  if (existing === null) {
+    return layout.focusedPaneId;
+  }
+  return existing.content.kind === "plugin-panel" &&
+    content.kind === "plugin-panel" &&
+    existing.content.subPath !== content.subPath
+    ? existing.paneId
+    : null;
+}
+
 /** Reconciles any splittable page route into the focused pane. */
 export function reconcileLayoutForContent(
   layout: SplitLayout | null,
@@ -72,19 +96,16 @@ export function reconcileLayoutForContent(
   if (layout === null) {
     return createSinglePaneContentLayout(content);
   }
+  const replacedPaneId = paneReplacedByContent(layout, content);
+  const withRouteState =
+    replacedPaneId === null
+      ? layout
+      : replacePaneContent(layout, replacedPaneId, content);
   const existing = findPaneByContent(layout.root, content);
-  if (existing !== null) {
-    const withRouteState =
-      existing.content.kind === "plugin-panel" &&
-      content.kind === "plugin-panel" &&
-      existing.content.subPath !== content.subPath
-        ? replacePaneContent(layout, existing.paneId, content)
-        : layout;
-    return withRouteState.focusedPaneId === existing.paneId
-      ? withRouteState
-      : setFocus(withRouteState, existing.paneId);
-  }
-  return replacePaneContent(layout, layout.focusedPaneId, content);
+  const targetPaneId = existing?.paneId ?? layout.focusedPaneId;
+  return withRouteState.focusedPaneId === targetPaneId
+    ? withRouteState
+    : setFocus(withRouteState, targetPaneId);
 }
 
 export function focusedPaneRoute(layout: SplitLayout): string | null {

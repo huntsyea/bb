@@ -139,7 +139,33 @@ import {
 } from "./useThreadSecondaryPanelVisibility";
 import type { HostConnectionNotice } from "./ThreadTimelinePane";
 import { useThreadStorageViewer } from "@/components/secondary-panel/useThreadStorageViewer";
-import { getThreadConversationCollapsedAtom } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
+import {
+  getThreadPresentationStateAtom,
+  getThreadWorkModeAtom,
+  getThreadWorkSurfaceRecencyAtom,
+} from "@/components/secondary-panel/threadSecondaryPanelAtoms";
+import {
+  canEnterThreadWorkMode,
+  canRequestThreadWorkMode,
+  matchesThreadWorkModeSignal,
+  resolveThreadPresentationMode,
+  resolveThreadSurfaceArrangement,
+} from "./threadWorkMode";
+import {
+  haveThreadTabsHydrated,
+  resolveThreadPresentationRestore,
+  touchThreadPresentationState,
+} from "./threadPresentationState";
+import {
+  WORK_MODE_NO_SURFACE_NOTICE,
+  createWorkSurfaceSnapshot,
+  hasEligibleWorkSurface,
+  isEligibleWorkSurface,
+  resolveLiveThreadWorkModeSurfaces,
+  recordEligibleWorkSurfaceRecency,
+  resolveEnterThreadWorkMode,
+  resolveWorkSurfaceSnapshotForThread,
+} from "./workSurfaceEligibility";
 import {
   HostFilePreviewTabContent,
   ThreadStorageFilePreviewTabContent,
@@ -189,6 +215,7 @@ import {
 } from "@/components/secondary-panel/useThreadFileTabs";
 import { isSecondaryFileTab } from "@/components/secondary-panel/secondaryPanelTabState";
 import { useThreadOpenFileSignal } from "@/components/secondary-panel/useThreadOpenFileSignal";
+import { wsManager } from "@/lib/ws";
 import type { PromptMentionLinkResolver } from "@/components/promptbox/editor/prompt-mention-link";
 import type { SecondaryPanelFileTab } from "@/components/secondary-panel/ThreadSecondaryPanel";
 import { useEnvironmentMergeBase } from "@/components/secondary-panel/git-diff/useEnvironmentMergeBase";
@@ -226,6 +253,8 @@ import {
   useTouchFixedPanelTabsState,
   useUpdateFixedPanelTabsState,
 } from "@/lib/fixed-panel-tabs";
+import { useThreadTabs } from "@/hooks/queries/thread-tabs-query";
+import { areThreadTabListsEquivalent } from "@/lib/thread-tabs-sync";
 import { createNewTabFixedPanelTab } from "@/lib/fixed-panel-tabs-state";
 import { isRootThread } from "./threadParentSelectorOptions";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
@@ -492,12 +521,20 @@ export function ThreadDetailView(props: ThreadDetailViewProps) {
 
 function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
   const { projectId, threadId } = props;
-  const { isFocused, navigateInPane, onRequestClose, isBoundedPane } =
-    usePaneContext();
+  const {
+    isFocused,
+    isMaximized,
+    navigateInPane,
+    onRequestClose,
+    isBoundedPane,
+    secondaryPanelHost,
+    setWorkModeMaximized,
+  } = usePaneContext();
   const navigate = useNavigate();
   useFixedPanelTabsStorageMaintenance(threadId);
   const systemConfigQuery = useSystemConfig();
   const fixedPanelTabsState = useFixedPanelTabsState(threadId, threadId);
+  const threadTabsQuery = useThreadTabs(threadId);
   const isPersistedSecondaryPanelOpen = fixedPanelTabsState.secondary.isOpen;
   const activeFixedSecondaryTab = getActiveFixedSecondaryTab({
     fixedPanelTabsState,
@@ -1340,16 +1377,287 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     onSelectPath: handleSelectStorageBrowserPath,
     selectedPath: activeStorageFilePath,
   });
-  const [storedConversationCollapsed, setStoredConversationCollapsed] = useAtom(
-    getThreadConversationCollapsedAtom(threadId),
+  const [isWorkMode, setIsWorkMode] = useAtom(getThreadWorkModeAtom(threadId));
+  const [workSurfaceRecencyTabIds, setWorkSurfaceRecencyTabIds] = useAtom(
+    getThreadWorkSurfaceRecencyAtom(threadId),
   );
-  const isConversationCollapsed = storedConversationCollapsed;
-  // The collapse preference only applies while the panel is open on a wide
-  // viewport; ThreadDetailSecondaryContent gates it (there is nothing to expand
-  // into otherwise) and surfaces the toggle on the seam arrow.
-  const toggleConversationCollapse = useCallback(() => {
-    setStoredConversationCollapsed((collapsed) => !collapsed);
-  }, [setStoredConversationCollapsed]);
+  const [presentationState, setPresentationState] = useAtom(
+    getThreadPresentationStateAtom(threadId),
+  );
+  const isStandaloneLayout = secondaryPanelHost === null;
+  const hasEligibleSurface = hasEligibleWorkSurface(
+    fixedPanelTabsState.secondary.tabs,
+  );
+  const canRequestWorkMode = canRequestThreadWorkMode({
+    hasEligibleWorkSurface: hasEligibleSurface,
+    isSecondaryPanelOpen,
+  });
+  const canEnterWorkMode = canEnterThreadWorkMode({
+    hasEligibleWorkSurface: hasEligibleSurface,
+    isMaximizedPane: isMaximized,
+    isSecondaryPanelOpen,
+    isStandaloneLayout,
+  });
+  const isWorkModeActive = isWorkMode && canEnterWorkMode;
+  const tabsHydrated = haveThreadTabsHydrated({
+    hasQueryError: threadTabsQuery.isError,
+    hasSettledQuery: threadTabsQuery.isFetched,
+    isLocalOnlyRevision: threadTabsQuery.data?.revision === 0,
+    localMatchesRemote:
+      threadTabsQuery.data !== undefined &&
+      areThreadTabListsEquivalent(
+        fixedPanelTabsState.secondary.tabs,
+        threadTabsQuery.data.tabs,
+      ),
+    localTabCount: fixedPanelTabsState.secondary.tabs.length,
+  });
+  // A hosted pane in Work mode needs the whole workspace, so it claims a
+  // Work-mode-owned maximization of its own pane and releases it on every exit
+  // (mode off, panel closed, work surface gone, focus moved to a sibling pane).
+  // The claim is a no-op when the user already maximized this pane, so that
+  // maximization survives leaving Work mode. A compact viewport is not an exit:
+  // compact inverts the drawer rather than opting out of Work mode.
+  const wantsPaneMaximizedForWorkMode =
+    isWorkMode && isFocused && !isStandaloneLayout && canRequestWorkMode;
+  useEffect(() => {
+    if (setWorkModeMaximized === null) {
+      return;
+    }
+    setWorkModeMaximized(wantsPaneMaximizedForWorkMode);
+  }, [setWorkModeMaximized, wantsPaneMaximizedForWorkMode]);
+  const surfaceArrangement = resolveThreadSurfaceArrangement(
+    resolveThreadPresentationMode(isWorkModeActive),
+  );
+  const previousWorkSurfaceRef = useRef(
+    createWorkSurfaceSnapshot({
+      activeTab: activeFixedSecondaryTab,
+      threadId,
+    }),
+  );
+  const restoredPresentationThreadIdRef = useRef<string | null>(null);
+  const resetWorkSurfaceSnapshotIfThreadChanged = useCallback(() => {
+    const resolved = resolveWorkSurfaceSnapshotForThread({
+      activeTab: activeFixedSecondaryTab,
+      snapshot: previousWorkSurfaceRef.current,
+      threadId,
+    });
+    previousWorkSurfaceRef.current = resolved.snapshot;
+    return resolved.didReset;
+  }, [activeFixedSecondaryTab, threadId]);
+  useEffect(() => {
+    if (!tabsHydrated) {
+      return;
+    }
+    if (resetWorkSurfaceSnapshotIfThreadChanged()) {
+      return;
+    }
+    const activeTab = activeFixedSecondaryTab;
+    if (activeTab === null || !isEligibleWorkSurface(activeTab)) {
+      return;
+    }
+    const previous = previousWorkSurfaceRef.current;
+    const previousStillPresent =
+      previous.activeTabId !== null &&
+      fixedPanelTabsState.secondary.tabs.some(
+        (tab) => tab.id === previous.activeTabId,
+      );
+    // A close/prune neighbor is not a use. Only record user switches, newly
+    // opened surfaces, and New-tab replacements.
+    if (!previousStillPresent && previous.wasEligible) {
+      return;
+    }
+    setWorkSurfaceRecencyTabIds((current) =>
+      recordEligibleWorkSurfaceRecency(current, activeTab.id),
+    );
+  }, [
+    activeFixedSecondaryTab,
+    fixedPanelTabsState.secondary.tabs,
+    resetWorkSurfaceSnapshotIfThreadChanged,
+    setWorkSurfaceRecencyTabIds,
+    tabsHydrated,
+  ]);
+  useEffect(() => {
+    const restoreDecision = resolveThreadPresentationRestore({
+      canEnterWorkMode,
+      state: presentationState,
+      tabs: fixedPanelTabsState.secondary.tabs,
+      tabsHydrated,
+    });
+    if (restoreDecision.kind === "wait") {
+      return;
+    }
+    const didChangeThread = resetWorkSurfaceSnapshotIfThreadChanged();
+    if (restoredPresentationThreadIdRef.current !== threadId) {
+      restoredPresentationThreadIdRef.current = threadId;
+      setPresentationState(
+        touchThreadPresentationState(restoreDecision.state, Date.now()),
+      );
+      if (
+        restoreDecision.activateTabId !== null &&
+        restoreDecision.activateTabId !== activeFixedSecondaryTabId
+      ) {
+        activateTab(restoreDecision.activateTabId);
+      }
+      const restoredTab =
+        restoreDecision.activateTabId === null
+          ? activeFixedSecondaryTab
+          : (fixedPanelTabsState.secondary.tabs.find(
+              (tab) => tab.id === restoreDecision.activateTabId,
+            ) ?? activeFixedSecondaryTab);
+      previousWorkSurfaceRef.current = createWorkSurfaceSnapshot({
+        activeTab: restoredTab,
+        threadId,
+      });
+      return;
+    }
+    if (didChangeThread) {
+      return;
+    }
+    const result = resolveLiveThreadWorkModeSurfaces({
+      activeTabId: activeFixedSecondaryTabId,
+      canEnterWorkMode,
+      isWorkMode,
+      previousActiveTabId: previousWorkSurfaceRef.current.activeTabId,
+      previousWasEligible: previousWorkSurfaceRef.current.wasEligible,
+      recencyTabIds: workSurfaceRecencyTabIds,
+      tabs: fixedPanelTabsState.secondary.tabs,
+    });
+    if (result.kind === "skip") {
+      previousWorkSurfaceRef.current = createWorkSurfaceSnapshot({
+        activeTab: activeFixedSecondaryTab,
+        threadId,
+      });
+      return;
+    }
+    if (result.kind === "exit") {
+      setIsWorkMode(() => false);
+      appToast.message(WORK_MODE_NO_SURFACE_NOTICE, {
+        id: `thread-work-mode-exit:${threadId}`,
+      });
+      previousWorkSurfaceRef.current = createWorkSurfaceSnapshot({
+        activeTab: activeFixedSecondaryTab,
+        threadId,
+      });
+      return;
+    }
+    if (
+      result.kind === "activate" &&
+      result.activeTabId !== activeFixedSecondaryTabId
+    ) {
+      activateTab(result.activeTabId);
+      return;
+    }
+    const nextActiveTabId = result.activeTabId;
+    const nextActiveTab =
+      nextActiveTabId === null
+        ? null
+        : (fixedPanelTabsState.secondary.tabs.find(
+            (tab) => tab.id === nextActiveTabId,
+          ) ?? null);
+    previousWorkSurfaceRef.current = createWorkSurfaceSnapshot({
+      activeTab: nextActiveTab,
+      threadId,
+    });
+  }, [
+    activateTab,
+    activeFixedSecondaryTab,
+    activeFixedSecondaryTabId,
+    canEnterWorkMode,
+    fixedPanelTabsState.secondary.tabs,
+    isWorkMode,
+    presentationState,
+    resetWorkSurfaceSnapshotIfThreadChanged,
+    setIsWorkMode,
+    setPresentationState,
+    tabsHydrated,
+    threadId,
+    workSurfaceRecencyTabIds,
+  ]);
+  const toggleWorkMode = useCallback(() => {
+    if (isWorkMode) {
+      setIsWorkMode(() => false);
+      return;
+    }
+    const entry = resolveEnterThreadWorkMode({
+      activeTabId: activeFixedSecondaryTabId,
+      recencyTabIds: workSurfaceRecencyTabIds,
+      tabs: fixedPanelTabsState.secondary.tabs,
+    });
+    if (!entry.canEnter) {
+      return;
+    }
+    if (
+      entry.activeTabId !== null &&
+      entry.activeTabId !== activeFixedSecondaryTabId
+    ) {
+      activateTab(entry.activeTabId);
+    }
+    setIsWorkMode(() => true);
+  }, [
+    activateTab,
+    activeFixedSecondaryTabId,
+    fixedPanelTabsState.secondary.tabs,
+    isWorkMode,
+    setIsWorkMode,
+    workSurfaceRecencyTabIds,
+  ]);
+  // CLI/SDK Work mode actions arrive as ephemeral server broadcasts. Apply
+  // only when this thread is open here and, for enter/toggle-into-work-mode,
+  // has an eligible work surface; otherwise ignore without a state change.
+  useEffect(
+    () =>
+      wsManager.onThreadWorkMode((signal) => {
+        if (!matchesThreadWorkModeSignal(signal, { projectId, threadId })) {
+          return;
+        }
+        const shouldBeWorkMode =
+          signal.action === "toggle" ? !isWorkMode : signal.action === "enter";
+        if (shouldBeWorkMode === isWorkMode) {
+          return;
+        }
+        if (!shouldBeWorkMode) {
+          setIsWorkMode(() => false);
+          return;
+        }
+        const entry = resolveEnterThreadWorkMode({
+          activeTabId: activeFixedSecondaryTabId,
+          recencyTabIds: workSurfaceRecencyTabIds,
+          tabs: fixedPanelTabsState.secondary.tabs,
+        });
+        if (!entry.canEnter) {
+          return;
+        }
+        if (
+          entry.activeTabId !== null &&
+          entry.activeTabId !== activeFixedSecondaryTabId
+        ) {
+          activateTab(entry.activeTabId);
+        }
+        setIsWorkMode(() => true);
+      }),
+    [
+      activateTab,
+      activeFixedSecondaryTabId,
+      fixedPanelTabsState.secondary.tabs,
+      isWorkMode,
+      projectId,
+      setIsWorkMode,
+      threadId,
+      workSurfaceRecencyTabIds,
+    ],
+  );
+  const handleCloseSecondaryPanel = useCallback(() => {
+    if (isWorkMode) {
+      setIsWorkMode(() => false);
+    }
+    closeSecondaryPanel();
+  }, [closeSecondaryPanel, isWorkMode, setIsWorkMode]);
+  const handleToggleSecondaryPanel = useCallback(() => {
+    if (isSecondaryPanelOpen && isWorkMode) {
+      setIsWorkMode(() => false);
+    }
+    toggleSecondaryPanel();
+  }, [isSecondaryPanelOpen, isWorkMode, setIsWorkMode, toggleSecondaryPanel]);
   useEffect(() => {
     setHasRequestedMergeBaseOptions(false);
   }, [thread?.environmentId]);
@@ -1530,18 +1838,28 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
     }
     // No closable tab is active (e.g. thread-info or git-diff): hide the
     // panel before letting the next Cmd+W close the window.
-    closeSecondaryPanel();
+    handleCloseSecondaryPanel();
     return true;
   }, [
     activeFixedSecondaryTab,
-    closeSecondaryPanel,
     closeTab,
+    handleCloseSecondaryPanel,
     handleCloseTerminalTab,
     isSecondaryPanelOpen,
   ]);
   useAppCommandHandler("panel.toggle", () => {
     if (!isFocused) return false;
-    toggleSecondaryPanel();
+    handleToggleSecondaryPanel();
+    return true;
+  });
+  useAppCommandHandler("thread.workMode.toggle", () => {
+    if (!isFocused) return false;
+    // The offer gate, not the active gate: a hosted pane may enter Work mode
+    // before it is maximized — entering is what maximizes it.
+    if (!isWorkMode && !canRequestWorkMode) {
+      return false;
+    }
+    toggleWorkMode();
     return true;
   });
   useAppCommandHandler("panel.close", () => {
@@ -1553,7 +1871,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
       return false;
     }
     if (isSecondaryPanelOpen && activeFixedSecondaryTab?.kind === "git-diff") {
-      closeSecondaryPanel();
+      handleCloseSecondaryPanel();
     } else {
       openSecondaryPanelDiffPanel();
     }
@@ -2560,7 +2878,8 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
       isSecondaryPanelOpen={isSecondaryPanelOpen}
       onClosePane={onRequestClose ?? undefined}
       onOpenThreadGitAction={gitActions.threadGitActionDialog.onOpen}
-      onToggleSecondaryPanel={toggleSecondaryPanel}
+      onToggleSecondaryPanel={handleToggleSecondaryPanel}
+      presentation={isWorkModeActive ? "conversation-rail" : "page"}
       pluginActions={
         <PluginThreadHeaderActions
           threadId={thread.id}
@@ -2732,10 +3051,11 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
           header={timelineHeader}
           isMetadataLoading={environmentQuery.isLoading}
           isSecondaryPanelOpen={isSecondaryPanelOpen}
-          isConversationCollapsed={isConversationCollapsed}
+          isWorkMode={isWorkModeActive}
+          hasPendingInteraction={hasPendingInteraction}
           isBoundedPane={isBoundedPane}
-          onToggleSecondaryPanel={toggleSecondaryPanel}
-          onToggleConversationCollapse={toggleConversationCollapse}
+          onToggleSecondaryPanel={handleToggleSecondaryPanel}
+          onToggleWorkMode={toggleWorkMode}
           renderHostedPanel={(panel) => (
             <MarkdownLocalFileContextMenuContext.Provider
               value={getLocalFileContextMenuItems}
@@ -2785,6 +3105,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
           }}
           secondaryPanel={{
             activeTab: activeFixedSecondaryTab,
+            canEnterWorkMode: hasEligibleSurface,
             canUseGitUi,
             environmentId: thread.environmentId ?? undefined,
             workspaceRootPath: environment?.path,
@@ -2800,8 +3121,8 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
             renderBrowserDeck,
             isBrowserTabActive,
             isOpen: isSecondaryPanelOpen,
-            onClose: closeSecondaryPanel,
-            onCollapse: closeSecondaryPanel,
+            onClose: handleCloseSecondaryPanel,
+            onCollapse: handleCloseSecondaryPanel,
             onClearPendingGitDiffIntent: clearPendingGitDiffIntent,
             onOpenFileInEditor: handleOpenFileInEditor,
             onFileTabReorder: reorderFileTab,
@@ -2815,6 +3136,7 @@ function ThreadDetailViewInternal(props: ThreadDetailViewInternalProps) {
             onPanelChange: handleSecondaryPanelChange,
             showGitDiffTab: canUseGitUi,
           }}
+          surfaceArrangement={surfaceArrangement}
           timeline={{
             activeThinking,
             canSpawnChild: thread.canSpawnChild,

@@ -3,7 +3,7 @@ import {
   getSecondaryPanelChromeStackClassName,
   getReservedInlinePanelToggleClassName,
   isSecondaryPanelLayoutTransition,
-  resolveCollapsedPanelTrafficLightReserveClassName,
+  resolvePrimaryWorkSurfaceTrafficLightReserveClassName,
   resolveSecondaryPanelHideControl,
 } from "./ThreadSecondaryPanel";
 import {
@@ -24,6 +24,15 @@ describe("secondary panel hide control", () => {
     expect(resolveSecondaryPanelHideControl()).toEqual({
       iconName: "PanelRight",
       label: "Hide right panel",
+    });
+  });
+
+  it("names the hide control for a primary work surface", () => {
+    expect(
+      resolveSecondaryPanelHideControl({ isPrimaryWorkSurface: true }),
+    ).toEqual({
+      iconName: "PanelRight",
+      label: "Hide work surface",
     });
   });
 });
@@ -71,53 +80,52 @@ describe("getReservedInlinePanelToggleClassName", () => {
   });
 });
 
-// BB-46: while the panel is full screen inside the split-workspace host and
-// the main sidebar is collapsed, the panel is the window's flush top-left
-// surface, so its leading toolbar shares the title-bar row with the macOS
-// traffic lights and the pinned sidebar trigger. Without the reserve the
-// leading Info/tab controls render under the lights and directly over the
+// BB-46: in Work mode the panel leads the row — the conversation is a rail on
+// the far side — so with the main sidebar collapsed the panel is the window's
+// flush top-left surface and its leading toolbar shares the title-bar row with
+// the macOS traffic lights and the pinned sidebar trigger. Without the reserve
+// the leading Info/tab controls render under the lights and directly over the
 // sidebar trigger (BB-46's collapsed-left / expanded-right conflict).
-describe("resolveCollapsedPanelTrafficLightReserveClassName", () => {
+describe("resolvePrimaryWorkSurfaceTrafficLightReserveClassName", () => {
   const base = {
-    isConversationCollapsed: true,
+    isPrimaryWorkSurface: true,
     renderAsDrawer: false,
     isSidebarShowing: false as boolean | null,
     reserveMacosTrafficLights: true,
   };
 
-  // Covers both thread surfaces. Collapsing takes the conversation column to
-  // zero width and the thread header with it, on the split host and on inline
-  // thread detail alike, leaving the panel alone on the title-bar row. The
-  // reserve used to additionally require the split host, which is what left
-  // inline detail's tab strip sitting under the traffic lights; with that gate
-  // gone the surfaces are indistinguishable here, so one case covers them.
-  it("reserves the safe area for the panel full-screen case", () => {
-    expect(resolveCollapsedPanelTrafficLightReserveClassName(base)).toBe(
+  // Covers both thread surfaces. Work mode moves the panel to the leading edge
+  // on the split host and on inline thread detail alike. The reserve used to
+  // additionally require the split host, which is what left inline detail's tab
+  // strip sitting under the traffic lights; with that gate gone the surfaces
+  // are indistinguishable here, so one case covers them.
+  it("reserves the safe area while the panel is the primary work surface", () => {
+    expect(resolvePrimaryWorkSurfaceTrafficLightReserveClassName(base)).toBe(
       MACOS_COLLAPSED_TOP_LEFT_RESERVE_CLASS,
     );
   });
 
   it("does not reserve when the main sidebar is showing (it hosts the lights)", () => {
     expect(
-      resolveCollapsedPanelTrafficLightReserveClassName({
+      resolvePrimaryWorkSurfaceTrafficLightReserveClassName({
         ...base,
         isSidebarShowing: true,
       }),
     ).toBe(false);
   });
 
-  it("does not reserve when the conversation is expanded (panel sits on the right)", () => {
+  it("does not reserve in Conversation mode (panel sits on the right)", () => {
     expect(
-      resolveCollapsedPanelTrafficLightReserveClassName({
+      resolvePrimaryWorkSurfaceTrafficLightReserveClassName({
         ...base,
-        isConversationCollapsed: false,
+        isPrimaryWorkSurface: false,
       }),
     ).toBe(false);
   });
 
   it("does not reserve in the compact drawer layout", () => {
     expect(
-      resolveCollapsedPanelTrafficLightReserveClassName({
+      resolvePrimaryWorkSurfaceTrafficLightReserveClassName({
         ...base,
         renderAsDrawer: true,
       }),
@@ -126,7 +134,7 @@ describe("resolveCollapsedPanelTrafficLightReserveClassName", () => {
 
   it("does not reserve off macOS chrome or in fullscreen (no visible lights)", () => {
     expect(
-      resolveCollapsedPanelTrafficLightReserveClassName({
+      resolvePrimaryWorkSurfaceTrafficLightReserveClassName({
         ...base,
         reserveMacosTrafficLights: false,
       }),
@@ -135,7 +143,7 @@ describe("resolveCollapsedPanelTrafficLightReserveClassName", () => {
 
   it("treats an absent sidebar context (null) as showing, so it does not reserve", () => {
     expect(
-      resolveCollapsedPanelTrafficLightReserveClassName({
+      resolvePrimaryWorkSurfaceTrafficLightReserveClassName({
         ...base,
         isSidebarShowing: null,
       }),

@@ -169,6 +169,7 @@ function withPaneContext(
     onRequestClose: noop,
     isMaximized: false,
     onToggleMaximize: noop,
+    setWorkModeMaximized: null,
     isBoundedPane: true,
     isTopRow,
     ownsWindowTopLeft: isTopRow,

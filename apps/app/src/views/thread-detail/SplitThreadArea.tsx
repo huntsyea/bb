@@ -24,7 +24,11 @@ import { BbHttpError } from "@/lib/sdk";
 import { useThread } from "@/hooks/queries/thread-queries";
 import { useThreadSplitsEnabled } from "@/hooks/useThreadSplitsEnabled";
 import { useSplitWorkspaceActive } from "@/hooks/useSplitWorkspaceActive";
-import { maximizedPaneIdAtom, splitLayoutAtom } from "@/lib/split-layout/atoms";
+import {
+  maximizedPaneIdAtom,
+  splitLayoutAtom,
+  workModeMaximizedPaneIdAtom,
+} from "@/lib/split-layout/atoms";
 import {
   clampSplitPairFraction,
   computePaneRects,
@@ -92,6 +96,7 @@ import {
   createSinglePaneLayout,
   focusedPaneRoute,
   paneContentRoute,
+  paneReplacedByContent,
   reconcileLayoutForContent,
   threadPaneContent,
 } from "./splitThreadNavigation";
@@ -103,6 +108,7 @@ import {
 } from "@/lib/bb-desktop";
 import { SplitWorkspaceSecondaryPanelHost } from "./SplitWorkspaceSecondaryPanelHost";
 import { SecondaryPanelHostLayoutContext } from "@/components/secondary-panel/SecondaryPanelHostLayoutContext";
+import { getThreadWorkModeAtom } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
 import {
   CONTEXT_INACTIVE_TEXT_CLASS,
   CONTEXT_SELECTION_SURFACE_CLASS,
@@ -122,6 +128,8 @@ type BeginPaneDrag = (
 const EMPTY_PATH: SplitPath = [];
 
 type NavigateInPane = (paneId: string, thread: ThreadRoutePathArgs) => void;
+
+type SetPaneWorkModeMaximized = (paneId: string, maximized: boolean) => void;
 
 /**
  * Renders the 1–8 thread panes that live in the main content area. It bridges
@@ -230,6 +238,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
   const [storedLayout, setLayout] = useAtom(splitLayoutAtom);
   const [maximizedPaneId, setMaximizedPaneIdAtom] =
     useAtom(maximizedPaneIdAtom);
+  const workModeMaximizedPaneId = useAtomValue(workModeMaximizedPaneIdAtom);
   const secondaryPanelRegistry = useMemo(
     () => createPaneSecondaryPanelRegistry(),
     [],
@@ -243,18 +252,6 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     () => routeContent ?? (routeThread ? threadPaneContent(routeThread) : null),
     [routeContent, routeThread],
   );
-
-  // Fold external navigation (initial load, sidebar click, deep link) into the
-  // layout. The reconcile is idempotent, so a URL that already matches the
-  // focused pane is a no-op — no history spam, no render loop.
-  useEffect(() => {
-    if (!threadSplitsEnabled || currentContent === null) {
-      return;
-    }
-    setLayout((previous) =>
-      reconcileLayoutForContent(previous, currentContent),
-    );
-  }, [currentContent, setLayout, threadSplitsEnabled]);
 
   // Effective layout for render/handlers before the effect seeds the atom.
   const layout: SplitLayout | null =
@@ -281,13 +278,117 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
     captureVisibleScrollPositions,
     workspaceRef: preservedScrollWorkspaceRef,
   } = usePreservedSplitScrollPositions(effectiveMaximizedPaneId);
+  // Every maximization change that isn't Work mode's own claim/release hands the
+  // maximization back to the user, so the recorded ownership is dropped unless
+  // it still names the pane being maximized. Leaving Work mode then restores the
+  // split only where Work mode still owns the change.
   const setMaximizedPaneId = useCallback(
     (next: SetStateAction<string | null>) => {
+      const resolved =
+        typeof next === "function" ? next(store.get(maximizedPaneIdAtom)) : next;
       captureVisibleScrollPositions();
-      setMaximizedPaneIdAtom(next);
+      if (store.get(workModeMaximizedPaneIdAtom) !== resolved) {
+        store.set(workModeMaximizedPaneIdAtom, null);
+      }
+      setMaximizedPaneIdAtom(resolved);
     },
-    [captureVisibleScrollPositions, setMaximizedPaneIdAtom],
+    [captureVisibleScrollPositions, setMaximizedPaneIdAtom, store],
   );
+
+  /**
+   * Claims or releases a Work-mode-owned maximization of `paneId`.
+   *
+   * Claiming is a no-op when the user already maximized this pane: Work mode
+   * never takes ownership of a maximization it didn't cause, so requirement 3
+   * (a user-maximized pane stays maximized after Work mode exits) falls out of
+   * the recording rather than the restore path. Releasing only restores the
+   * split while the recorded owner is still this pane.
+   */
+  const setPaneWorkModeMaximized = useCallback(
+    (paneId: string, maximized: boolean) => {
+      const current = store.get(splitLayoutAtom);
+      if (
+        current === null ||
+        countPanes(current.root) < 2 ||
+        findPane(current.root, paneId) === null
+      ) {
+        return;
+      }
+      if (maximized) {
+        if (
+          store.get(workModeMaximizedPaneIdAtom) === paneId ||
+          store.get(maximizedPaneIdAtom) === paneId
+        ) {
+          return;
+        }
+        captureVisibleScrollPositions();
+        store.set(workModeMaximizedPaneIdAtom, paneId);
+        setMaximizedPaneIdAtom(paneId);
+        return;
+      }
+      if (store.get(workModeMaximizedPaneIdAtom) !== paneId) {
+        return;
+      }
+      captureVisibleScrollPositions();
+      store.set(workModeMaximizedPaneIdAtom, null);
+      if (store.get(maximizedPaneIdAtom) === paneId) {
+        setMaximizedPaneIdAtom(null);
+      }
+    },
+    [captureVisibleScrollPositions, setMaximizedPaneIdAtom, store],
+  );
+
+  /**
+   * Applies a focus change to the current maximization.
+   *
+   * A user's maximization follows focus, because the focused pane is the one
+   * the user is looking at. A Work-mode-owned one must not: the hidden split
+   * belongs to the Thread that entered Work mode, so focusing a sibling gives
+   * the split back instead of handing a hidden workspace to a Thread that
+   * never asked for Work mode.
+   */
+  const carryMaximizationToFocusedPane = useCallback(
+    (focusedPaneId: string) => {
+      const owner = store.get(workModeMaximizedPaneIdAtom);
+      if (owner !== null && owner !== focusedPaneId) {
+        setPaneWorkModeMaximized(owner, false);
+        return;
+      }
+      setMaximizedPaneId(focusedPaneId);
+    },
+    [setMaximizedPaneId, setPaneWorkModeMaximized, store],
+  );
+
+  // Fold external navigation (initial load, sidebar click, deep link) into the
+  // layout. The reconcile is idempotent, so a URL that already matches the
+  // focused pane is a no-op — no history spam, no render loop.
+  //
+  // External navigation swaps pane content without changing focus, so neither
+  // navigateInPane nor the focus-carry effect covers it. A Work-mode-owned
+  // maximization is released here, before the swap, so the destination Thread
+  // mounts into a restored split instead of inheriting a hidden workspace it
+  // never asked for.
+  useEffect(() => {
+    if (!threadSplitsEnabled || currentContent === null) {
+      return;
+    }
+    const owner = store.get(workModeMaximizedPaneIdAtom);
+    if (
+      owner !== null &&
+      paneReplacedByContent(store.get(splitLayoutAtom), currentContent) === owner
+    ) {
+      setPaneWorkModeMaximized(owner, false);
+    }
+    setLayout((previous) =>
+      reconcileLayoutForContent(previous, currentContent),
+    );
+  }, [
+    currentContent,
+    setLayout,
+    setPaneWorkModeMaximized,
+    store,
+    threadSplitsEnabled,
+  ]);
 
   // CLI/SDK pane actions arrive as ephemeral server broadcasts. This split
   // owner applies them so agent-driven transitions share the local control's
@@ -338,14 +439,24 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
       return;
     }
     if (layout.focusedPaneId !== maximizedPaneId) {
-      setMaximizedPaneId(layout.focusedPaneId);
+      carryMaximizationToFocusedPane(layout.focusedPaneId);
     }
-  }, [layout, maximizedPane, maximizedPaneId, setMaximizedPaneId]);
+  }, [
+    carryMaximizationToFocusedPane,
+    layout,
+    maximizedPane,
+    maximizedPaneId,
+    setMaximizedPaneId,
+  ]);
 
   // Content navigation inside a pane pushes history like the page surface does
   // today. replacePaneContent focuses the pane, so the pushed URL matches it.
   const navigateInPane = useCallback<NavigateInPane>(
     (paneId, thread) => {
+      // Leaving the Thread that entered Work mode gives the split back before
+      // the destination mounts, so the hidden siblings never stay hidden on a
+      // Thread that never asked for Work mode.
+      setPaneWorkModeMaximized(paneId, false);
       setLayout((previous) =>
         previous === null
           ? previous
@@ -353,7 +464,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
       );
       navigate(getThreadRoutePath(thread));
     },
-    [navigate, setLayout],
+    [navigate, setLayout, setPaneWorkModeMaximized],
   );
 
   // Focusing a pane rewrites the URL with replace (focus changes shouldn't spam
@@ -366,13 +477,19 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
       const pane = findPane(layout.root, paneId);
       setLayout(setFocus(layout, paneId));
       if (maximizedPaneId !== null) {
-        setMaximizedPaneId(paneId);
+        carryMaximizationToFocusedPane(paneId);
       }
       if (pane !== null) {
         navigate(paneContentRoute(pane.content), { replace: true });
       }
     },
-    [layout, maximizedPaneId, navigate, setLayout, setMaximizedPaneId],
+    [
+      carryMaximizationToFocusedPane,
+      layout,
+      maximizedPaneId,
+      navigate,
+      setLayout,
+    ],
   );
 
   const closePane = useCallback(
@@ -410,6 +527,25 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
         store.set(splitLayoutAtom, next);
         const route = focusedPaneRoute(next);
         if (route !== null) navigate(route, { replace: true });
+      }
+      // Restoring the split under Work mode takes away the workspace Work mode
+      // needs, so Work mode turns off with it. Leaving the persisted mode on
+      // would render the Thread as conversation while its control reads "on",
+      // and the next click on that control would turn Work mode off again
+      // instead of entering it.
+      //
+      // This deliberately does not consult the recorded owner. Work mode claims
+      // nothing when the user maximized the pane first, so ownership is null in
+      // exactly the case where the pane is maximized and Work mode is on — the
+      // state that keeps a pre-existing maximization alive across a Work mode
+      // exit. What matters here is that the Thread is in Work mode and is about
+      // to lose the workspace, not which of the two put it there.
+      if (
+        store.get(maximizedPaneIdAtom) === paneId &&
+        pane.content.kind === "thread" &&
+        store.get(getThreadWorkModeAtom(pane.content.threadId))
+      ) {
+        store.set(getThreadWorkModeAtom(pane.content.threadId), () => false);
       }
       setMaximizedPaneId((previous) => (previous === paneId ? null : paneId));
     },
@@ -508,6 +644,13 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
       }
       const restoreMaximizeAfterDrag =
         store.get(maximizedPaneIdAtom) === paneId;
+      // A drag reveals and re-hides the split around the same pane, so a
+      // Work-mode-owned maximization must survive it — otherwise dropping the
+      // pane would silently hand ownership to the user and leaving Work mode
+      // would no longer restore the split.
+      const restoreWorkModeOwnershipAfterDrag =
+        restoreMaximizeAfterDrag &&
+        store.get(workModeMaximizedPaneIdAtom) === paneId;
       const sourceEl =
         event.currentTarget instanceof Element
           ? event.currentTarget.closest<HTMLElement>(
@@ -540,6 +683,12 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
                 // dragged content's destination, which is what must remain
                 // maximized.
                 setMaximizedPaneId(current.focusedPaneId);
+                if (restoreWorkModeOwnershipAfterDrag) {
+                  store.set(
+                    workModeMaximizedPaneIdAtom,
+                    current.focusedPaneId,
+                  );
+                }
               }
             }
           : undefined,
@@ -610,6 +759,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
           onRequestClose={null}
           isMaximized={false}
           onToggleMaximize={null}
+          onSetPaneWorkModeMaximized={null}
           isBoundedPane={false}
           isTopRow
           ownsWindowTopLeft
@@ -634,6 +784,10 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
         <SplitWorkspaceSecondaryPanelHost
           focusedPaneId={effectiveMaximizedPaneId ?? layout.focusedPaneId}
           isPaneMaximized={effectiveMaximizedPaneId !== null}
+          isWorkModeMaximized={
+            effectiveMaximizedPaneId !== null &&
+            workModeMaximizedPaneId === effectiveMaximizedPaneId
+          }
           registry={secondaryPanelRegistry}
         >
           <SplitTree
@@ -648,6 +802,7 @@ function SplitThreadAreaContent({ routeContent }: SplitThreadAreaProps) {
             onFocusPane={focusPane}
             onClosePane={closePane}
             onToggleMaximizePane={toggleMaximizePane}
+            onSetPaneWorkModeMaximized={setPaneWorkModeMaximized}
             onMovePaneToSide={movePaneToSide}
             onResize={resize}
             onNavigateInPane={navigateInPane}
@@ -727,6 +882,7 @@ interface SplitTreeProps {
   onFocusPane: (paneId: string) => void;
   onClosePane: (paneId: string) => void;
   onToggleMaximizePane: (paneId: string) => void;
+  onSetPaneWorkModeMaximized: SetPaneWorkModeMaximized;
   onMovePaneToSide: (paneId: string, side: SplitSide) => void;
   onResize: (
     splitPath: SplitPath,
@@ -788,6 +944,7 @@ function SplitTree(props: SplitTreeProps) {
           onRequestClose={() => props.onClosePane(node.paneId)}
           isMaximized={isMaximized}
           onToggleMaximize={() => props.onToggleMaximizePane(node.paneId)}
+          onSetPaneWorkModeMaximized={props.onSetPaneWorkModeMaximized}
           onMoveToSide={(side) => props.onMovePaneToSide(node.paneId, side)}
           isBoundedPane
           isTopRow={isMaximized || isTopRow}
@@ -867,6 +1024,8 @@ interface WorkspacePaneContentProps {
   onRequestClose: (() => void) | null;
   isMaximized: boolean;
   onToggleMaximize: (() => void) | null;
+  // Null on the single-pane surface, which has no split to hide.
+  onSetPaneWorkModeMaximized: SetPaneWorkModeMaximized | null;
   onMoveToSide?: (side: SplitSide) => void;
   // True inside multi-pane split cards; suppresses the page-bleed margins so
   // content fills the card exactly (see PaneContextValue.isBoundedPane).
@@ -888,6 +1047,7 @@ function WorkspacePaneContent({
   onRequestClose,
   isMaximized,
   onToggleMaximize,
+  onSetPaneWorkModeMaximized,
   onMoveToSide,
   isBoundedPane,
   isTopRow,
@@ -898,6 +1058,14 @@ function WorkspacePaneContent({
   const navigateInPane = useCallback(
     (thread: ThreadRoutePathArgs) => onNavigateInPane(paneId, thread),
     [onNavigateInPane, paneId],
+  );
+  const setWorkModeMaximized = useMemo(
+    () =>
+      onSetPaneWorkModeMaximized === null
+        ? null
+        : (maximized: boolean) =>
+            onSetPaneWorkModeMaximized(paneId, maximized),
+    [onSetPaneWorkModeMaximized, paneId],
   );
   const beginPaneDrag = useMemo(
     () =>
@@ -927,6 +1095,7 @@ function WorkspacePaneContent({
       onRequestClose,
       isMaximized,
       onToggleMaximize,
+      setWorkModeMaximized,
       onMoveToSide,
       isBoundedPane,
       isTopRow,
@@ -935,6 +1104,7 @@ function WorkspacePaneContent({
       beginPaneDrag,
     }),
     [
+      setWorkModeMaximized,
       beginPaneDrag,
       isBoundedPane,
       isFocused,

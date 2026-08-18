@@ -5,6 +5,34 @@ entry here (see [AGENTS.md](../AGENTS.md), "Plugin API"). Dropping the prefix
 is the deliberate stabilization step: audit the entry, rename project-wide,
 and delete the entry in the same change.
 
+## `bb.sdk.threads.experimental_workMode` (`@bb/sdk`)
+
+**What it does.** Lets an agent enter, exit, or toggle Work mode for a
+Thread it already has open in a connected app window — the same
+presentation state a user toggles by hand, where a Thread's work surface
+becomes primary content and the conversation becomes a resizable right-side
+rail. The server validates the target Thread is public, then broadcasts a
+typed ephemeral `thread-work-mode` signal to every connected app socket
+(mirroring `paneAction`'s transport) and returns how many sockets received
+it. Each connected app applies the transition only if that Thread is open
+there and has an eligible work surface; otherwise it ignores the signal
+without changing state.
+
+**Audit before stabilizing.**
+
+1. **Delivery vs. effect.** `delivered` counts sockets reached, not Threads
+   that actually transitioned — a caller cannot currently distinguish "no
+   app has this Thread open" from "it applied silently." Decide whether
+   callers need a stronger acknowledgment before this stabilizes.
+2. **Multi-window fan-out.** The signal broadcasts to every connected
+   client, so multiple windows with the same Thread open all transition
+   together. Confirm that is the expected multi-window semantics rather
+   than a single targeted window.
+3. **Enter with no eligible surface.** `enter`/`toggle`-into-work-mode are a
+   no-op when the target Thread has no eligible work surface open. Confirm
+   silent no-op (rather than a reported failure) is the right agent-facing
+   contract.
+
 ## `PluginNavPanelRegistration.experimental_sidebarAccessory`
 
 **What it does.** Lets a nav panel register a no-props, presentational React

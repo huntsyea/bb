@@ -18,11 +18,13 @@ type SecondaryPanelResizeHandler = (size: number) => void;
 interface UseSecondaryPanelResizeArgs {
   isSecondaryPanelOpen: boolean;
   onPanelWidthChange: SecondaryPanelWidthChangeHandler;
+  persistWidth?: boolean;
 }
 
 export function useSecondaryPanelResize({
   isSecondaryPanelOpen,
   onPanelWidthChange,
+  persistWidth = true,
 }: UseSecondaryPanelResizeArgs) {
   const [isSecondaryPanelDragging, setIsSecondaryPanelDragging] =
     useState(false);
@@ -72,11 +74,13 @@ export function useSecondaryPanelResize({
     setIsResizing(false);
     clearResizeCursor();
 
-    // Drag finished — persist the user's chosen width.
-    if (lastSecondaryPanelSizeRef.current > 0) {
+    // Drag finished — persist the user's chosen width unless the panel is
+    // currently the Work mode primary surface (that size is not the
+    // secondary-panel preference).
+    if (persistWidth && lastSecondaryPanelSizeRef.current > 0) {
       setPersistedWidthPercent(lastSecondaryPanelSizeRef.current);
     }
-  }, [setIsResizing, setPersistedWidthPercent]);
+  }, [persistWidth, setIsResizing, setPersistedWidthPercent]);
 
   const handleSecondaryPanelDragging =
     useCallback<SecondaryPanelDraggingHandler>(
@@ -142,6 +146,9 @@ export function useSecondaryPanelResize({
         return;
       }
 
+      if (!persistWidth) {
+        return;
+      }
       lastSecondaryPanelSizeRef.current = size;
       // Mirror the live panel size onto the content's fixed width (container-query
       // units against the horizontal group) for swipe mode: the content holds the
@@ -153,7 +160,7 @@ export function useSecondaryPanelResize({
         `${size}cqw`,
       );
     },
-    [],
+    [persistWidth],
   );
 
   return {

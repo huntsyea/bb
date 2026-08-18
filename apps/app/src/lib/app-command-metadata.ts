@@ -94,6 +94,11 @@ export const APP_COMMAND_GROUPS: readonly AppCommandGroup[] = [
         "Show or hide the secondary panel.",
       ),
       command(
+        "thread.workMode.toggle",
+        "Toggle Work mode",
+        "Enter Work mode or restore Conversation mode for the focused thread.",
+      ),
+      command(
         "pane.focus.previous",
         "Focus previous chat pane",
         "Focus the previous chat pane in reading order.",

@@ -7,10 +7,8 @@ import {
   type PointerEventHandler,
   type ReactNode,
 } from "react";
-import { useSetAtom } from "jotai";
 import type { ThreadListEntry } from "@bb/domain";
 import type { PluginComposerThreadRowStatus } from "@bb/plugin-sdk";
-import { getThreadConversationCollapsedAtom } from "@/components/secondary-panel/threadSecondaryPanelAtoms";
 import { Icon } from "@bb/shared-ui/icon";
 import { SidebarStickyTier } from "@/components/ui/sidebar.js";
 import { NavLink } from "react-router-dom";
@@ -479,9 +477,6 @@ function ThreadRowComponent({
 }: ThreadRowProps) {
   const [isDropdownActionsOpen, setIsDropdownActionsOpen] = useState(false);
   const [isContextActionsOpen, setIsContextActionsOpen] = useState(false);
-  const setConversationCollapsed = useSetAtom(
-    getThreadConversationCollapsedAtom(thread.id),
-  );
   const shortcut = useSidebarThreadShortcut(thread.id);
   const pluginThreadRowStatus = usePluginThreadRowStatus(thread.id);
   const showActive = isActive;
@@ -622,9 +617,6 @@ function ThreadRowComponent({
         data-sidebar-thread-shortcut-target=""
         data-sidebar-thread-id={thread.id}
         onClick={(event) => {
-          // Selecting a thread/agent row restores its conversation without
-          // disturbing any other thread's collapsed conversation state.
-          setConversationCollapsed(false);
           // Cmd/Ctrl-click is the split feature's second entry point: open the
           // thread in the split instead of replacing the focused pane. Match the
           // drag rules (right split / focus if open / replace at the cap).

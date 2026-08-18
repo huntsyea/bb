@@ -34,6 +34,18 @@ async function postPaneAction(
   });
 }
 
+async function postWorkMode(
+  harness: TestAppHarness,
+  threadId: string,
+  body: unknown,
+): Promise<Response> {
+  return harness.app.request(`/api/v1/threads/${threadId}/work-mode`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 describe("public thread open", () => {
   it("broadcasts an open-file signal to connected clients without persisting", async () => {
     await withTestHarness(async (harness) => {
@@ -212,4 +224,73 @@ describe("public thread open", () => {
     });
   });
 
+  it("broadcasts work-mode actions for a public thread and reports delivery", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps, {
+        id: "host-thread-work-mode",
+      });
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: "/tmp/thread-work-mode-source",
+      });
+      const thread = seedThread(harness.deps, { projectId: project.id });
+      const first = createMockHubSocket();
+      const second = createMockHubSocket();
+      harness.deps.hub.registerClient(first);
+      harness.deps.hub.registerClient(second);
+
+      for (const workModeAction of ["enter", "exit", "toggle"] as const) {
+        const response = await postWorkMode(harness, thread.id, {
+          action: workModeAction,
+        });
+
+        expect(response.status).toBe(200);
+        expect(await readJson(response)).toEqual({ delivered: 2 });
+      }
+
+      expect(first.messages).toHaveLength(3);
+      expect(second.messages).toHaveLength(3);
+      expect(
+        first.messages.map((message) => JSON.parse(message).action),
+      ).toEqual(["enter", "exit", "toggle"]);
+      expect(JSON.parse(first.messages[0]!)).toEqual({
+        type: "thread-work-mode",
+        projectId: project.id,
+        threadId: thread.id,
+        action: "enter",
+      });
+    });
+  });
+
+  it("returns 404 for work-mode on an unknown thread", async () => {
+    await withTestHarness(async (harness) => {
+      const response = await postWorkMode(harness, "thr_missing", {
+        action: "enter",
+      });
+
+      expect(response.status).toBe(404);
+    });
+  });
+
+  it("rejects an invalid work-mode action and sends nothing", async () => {
+    await withTestHarness(async (harness) => {
+      const { host } = seedHostSession(harness.deps, {
+        id: "host-thread-work-mode-bad",
+      });
+      const { project } = seedProjectWithSource(harness.deps, {
+        hostId: host.id,
+        path: "/tmp/thread-work-mode-bad-source",
+      });
+      const thread = seedThread(harness.deps, { projectId: project.id });
+      const socket = createMockHubSocket();
+      harness.deps.hub.registerClient(socket);
+
+      const response = await postWorkMode(harness, thread.id, {
+        action: "invalid",
+      });
+
+      expect(response.status).toBe(400);
+      expect(socket.messages).toHaveLength(0);
+    });
+  });
 });

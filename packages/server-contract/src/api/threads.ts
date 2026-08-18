@@ -631,6 +631,45 @@ export type ThreadPaneActionResponse = z.infer<
   typeof threadPaneActionResponseSchema
 >;
 
+/** Work mode transition for one thread's presentation in each connected app window. */
+export const threadWorkModeActionSchema = z.enum(["enter", "exit", "toggle"]);
+export type ThreadWorkModeAction = z.infer<typeof threadWorkModeActionSchema>;
+
+/** Request body for POST /threads/:id/work-mode. */
+export const threadWorkModeRequestSchema = z
+  .object({ action: threadWorkModeActionSchema })
+  .strict();
+export type ThreadWorkModeRequest = z.infer<
+  typeof threadWorkModeRequestSchema
+>;
+
+/** Ephemeral server→client request to change an already-open thread's Work mode. */
+export const threadWorkModeSignalSchema = z
+  .object({
+    type: z.literal("thread-work-mode"),
+    projectId: z.string().min(1),
+    threadId: z.string().min(1),
+    action: threadWorkModeActionSchema,
+  })
+  .strict();
+export type ThreadWorkModeSignal = z.infer<typeof threadWorkModeSignalSchema>;
+
+/** Lenient inbound parser for clients connected to a newer server. */
+export const threadWorkModeSignalLenientSchema = z.object({
+  type: z.literal("thread-work-mode"),
+  projectId: z.string(),
+  threadId: z.string(),
+  action: threadWorkModeActionSchema,
+});
+
+/** Number of connected app clients that received the Work mode action. */
+export const threadWorkModeResponseSchema = z.object({
+  delivered: z.number().int().nonnegative(),
+});
+export type ThreadWorkModeResponse = z.infer<
+  typeof threadWorkModeResponseSchema
+>;
+
 /** @deprecated Compatibility shape for clients that still call composer bootstrap. */
 export const threadComposerBootstrapResponseSchema = z.object({
   defaultExecutionOptions: resolvedThreadExecutionOptionsSchema.nullable(),

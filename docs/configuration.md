@@ -540,6 +540,15 @@ SDK request, plus ephemeral maximize/restore delivery through
 `sdk.threads.paneAction({ threadId, action })`. Pane actions apply only when the
 target thread is already open in a multi-pane app window; the response reports
 how many connected clients received the broadcast.
+Work mode — the per-thread presentation state that promotes a thread's work
+surface to primary content and collapses the conversation into a resizable
+rail — has the same ephemeral control surface: `bb thread work-mode
+enter|exit|toggle [thread-id]` and
+`sdk.threads.experimental_workMode({ threadId, action })`. The broadcast
+applies only when the target thread is open in an app window and has an
+eligible work surface to promote; otherwise it is ignored with no state
+change. As with pane actions, the response reports how many connected clients
+received the broadcast, not how many applied it.
 
 ## bb connect
 

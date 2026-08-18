@@ -90,6 +90,7 @@ function paneContext(paneId: string, isFocused: boolean): PaneContextValue {
     onMoveToSide: undefined,
     onRequestClose: vi.fn(),
     onToggleMaximize: vi.fn(),
+    setWorkModeMaximized: null,
     ownsWindowTopLeft: paneId === "pane-first",
     paneId,
     reservesWindowPanelToggle: false,

@@ -1,7 +1,12 @@
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 
-import { Drawer, DrawerContent, DrawerTitle } from "./drawer.js";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerTitle,
+  REDUCED_MOTION_QUERY,
+} from "./drawer.js";
 import {
   blurActiveKeyboardInputBeforeOverlayOpen,
   blurActiveKeyboardInputBeforeOverlayClose,
@@ -10,6 +15,7 @@ import {
   preventOverlayTriggerSelection,
 } from "./overlay-trigger.js";
 import { useIsCompactViewport } from "./hooks/use-compact-viewport.js";
+import { useMediaQuery } from "./hooks/use-media-query.js";
 import { usePointerCoarse } from "./hooks/use-pointer-coarse.js";
 
 // ---------------------------------------------------------------------------
@@ -298,6 +304,17 @@ export function ResponsiveDrawerShell({
     [],
   );
   const previousOpenRef = React.useRef(open);
+
+  // With reduced motion the drawer no longer animates (see drawer.tsx), so
+  // `animationend` never fires and the settle callback would otherwise be
+  // left to a consumer's timeout. Report the drawer as settled directly.
+  const prefersReducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
+  React.useEffect(() => {
+    if (!prefersReducedMotion || !open) {
+      return;
+    }
+    onContentAnimationEnd?.(true);
+  }, [onContentAnimationEnd, open, prefersReducedMotion]);
 
   React.useLayoutEffect(() => {
     if (previousOpenRef.current && !open) {

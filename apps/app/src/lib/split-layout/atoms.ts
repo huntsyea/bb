@@ -38,6 +38,16 @@ export const splitLayoutAtom = atomWithStorage<SplitLayout | null>(
   { getOnInit: true },
 );
 
+function createPaneIdStorage(): SyncStorage<string | null> {
+  return createTabScopedStorage<string | null>({
+    parse: (storedValue, initialValue) =>
+      storedValue !== null && storedValue.length > 0
+        ? storedValue
+        : initialValue,
+    serialize: (value) => value ?? "",
+  });
+}
+
 export const MAXIMIZED_PANE_STORAGE_KEY = "bb.splitLayout.maximizedPaneId";
 
 /**
@@ -52,13 +62,31 @@ export const MAXIMIZED_PANE_STORAGE_KEY = "bb.splitLayout.maximizedPaneId";
 export const maximizedPaneIdAtom = atomWithStorage<string | null>(
   MAXIMIZED_PANE_STORAGE_KEY,
   null,
-  createTabScopedStorage<string | null>({
-    parse: (storedValue, initialValue) =>
-      storedValue !== null && storedValue.length > 0
-        ? storedValue
-        : initialValue,
-    serialize: (value) => value ?? "",
-  }),
+  createPaneIdStorage(),
+  { getOnInit: true },
+);
+
+export const WORK_MODE_MAXIMIZED_PANE_STORAGE_KEY =
+  "bb.splitLayout.workModeMaximizedPaneId";
+
+/**
+ * The pane whose maximization Work mode owns, or null when the current
+ * maximization (if any) belongs to the user.
+ *
+ * Work mode needs the whole workspace to promote a Thread's work surface, so
+ * entering it in a split maximizes the owning pane through the same
+ * non-destructive mechanism as the manual control — the split tree is never
+ * rewritten. Recording ownership here is what makes leaving Work mode
+ * asymmetric: it restores the split only when Work mode caused the
+ * maximization, so a pane the user had already maximized stays maximized.
+ *
+ * Tab-scoped for the same reason as {@link maximizedPaneIdAtom}: it names a
+ * pane in that tab's layout.
+ */
+export const workModeMaximizedPaneIdAtom = atomWithStorage<string | null>(
+  WORK_MODE_MAXIMIZED_PANE_STORAGE_KEY,
+  null,
+  createPaneIdStorage(),
   { getOnInit: true },
 );
 
@@ -123,6 +151,7 @@ export const closePanesForThreadsAtom = atom(
         findPane(layout.root, maximizedPaneId) === null)
     ) {
       set(maximizedPaneIdAtom, null);
+      set(workModeMaximizedPaneIdAtom, null);
     }
     // The surviving focused pane may still be a targeted thread (recursive
     // archive covering every pane). Treat that as "no valid survivor": clear the
@@ -141,6 +170,7 @@ export const closePanesForThreadsAtom = atom(
     if (survivorRoute === null) {
       set(splitLayoutAtom, null);
       set(maximizedPaneIdAtom, null);
+      set(workModeMaximizedPaneIdAtom, null);
       return { removedAny: true, focusedRoute: null };
     }
     set(splitLayoutAtom, layout);

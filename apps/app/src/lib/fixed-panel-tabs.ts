@@ -27,6 +27,7 @@ import {
   scheduleLocalThreadTabsMigration,
   scheduleThreadTabsPersistence,
 } from "./thread-tabs-sync";
+import { pruneThreadPresentationStateStorage } from "@/views/thread-detail/threadPresentationState";
 
 const FIXED_PANEL_TABS_TOUCH_THROTTLE_MS = 60 * 1000;
 
@@ -198,6 +199,10 @@ export function useFixedPanelTabsStorageMaintenance(
   useEffect(() => {
     const now = Date.now();
     pruneFixedPanelTabsStorage({ now });
+    pruneThreadPresentationStateStorage({
+      now,
+      retainThreadId: panelStateId,
+    });
   }, [panelStateId]);
 }
 

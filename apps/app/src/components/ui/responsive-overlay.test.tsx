@@ -73,7 +73,12 @@ vi.mock("@bb/shared-ui/drawer", async () => {
   }: HTMLAttributes<HTMLHeadingElement>) =>
     React.createElement("h2", props, children);
 
-  return { Drawer, DrawerContent, DrawerTitle };
+  return {
+    Drawer,
+    DrawerContent,
+    DrawerTitle,
+    REDUCED_MOTION_QUERY: "(prefers-reduced-motion: reduce)",
+  };
 });
 
 afterEach(() => {

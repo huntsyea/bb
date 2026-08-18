@@ -70,8 +70,6 @@ export const ROOT_COMPOSE_PINNED_PANEL_TOGGLE_POSITION_CLASS =
 type RootSecondaryPanelProps = Omit<
   ComponentProps<typeof ThreadSecondaryPanel>,
   | "browserDeck"
-  | "isConversationCollapsed"
-  | "onToggleConversationCollapse"
   | "renderAsDrawer"
   | "showNewTabButton"
 > & {
@@ -88,8 +86,6 @@ interface RootComposeSecondaryContentProps {
   panelTogglePositionClassName: string;
   secondaryPanel: RootSecondaryPanelProps;
 }
-
-function noopToggleConversationCollapse(): void {}
 
 function DrawerPanelLoadingSkeleton() {
   return (
@@ -259,8 +255,6 @@ export function RootComposeSecondaryContent({
           {...threadSecondaryPanelProps}
           browserDeck={browserDeck}
           renderAsDrawer={false}
-          isConversationCollapsed={false}
-          onToggleConversationCollapse={noopToggleConversationCollapse}
           showNewTabButton
           // In the split-workspace host, panes' panels share one PanelGroup,
           // so each pane's Panel needs its own layout identity (see the prop
@@ -285,8 +279,6 @@ export function RootComposeSecondaryContent({
       {...threadSecondaryPanelProps}
       browserDeck={browserDeck}
       renderAsDrawer={true}
-      isConversationCollapsed={false}
-      onToggleConversationCollapse={noopToggleConversationCollapse}
       showNewTabButton
     />
   ) : null;
@@ -294,7 +286,6 @@ export function RootComposeSecondaryContent({
     () => ({
       composerHost,
       contentKey: "new-thread",
-      isMainCollapsed: false,
       isOpen: isSecondaryPanelOpen,
       panel: inlineSecondaryPanelContent,
       onToggle: onToggleSecondaryPanel,

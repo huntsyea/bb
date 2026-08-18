@@ -1,9 +1,20 @@
 // @vitest-environment jsdom
 
-import type { ComponentProps, ReactNode } from "react";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
+import {
+  CONVERSATION_DRAWER_CONTROL_LABEL,
+  CONVERSATION_PENDING_INDICATOR_LABEL,
+  resolveConversationPendingIndicatorElementId,
+} from "@/components/secondary-panel/panelToggleControlState";
 import { dispatchBrowserViewBoundsSync } from "@/lib/browser-view-bounds-sync";
 import { ThreadDetailSecondaryContent } from "./ThreadDetailSecondaryContent";
 import {
@@ -13,6 +24,7 @@ import {
   type PaneSecondaryPanelViewModel,
 } from "./PaneContext";
 import { MemoryRouter } from "react-router-dom";
+import type { ThreadSurfaceArrangement } from "./ThreadSurfaceHost";
 
 type ThreadDetailSecondaryContentProps = ComponentProps<
   typeof ThreadDetailSecondaryContent
@@ -66,8 +78,22 @@ vi.mock("react-resizable-panels", async () => {
   });
   PanelGroup.displayName = "MockPanelGroup";
 
-  const Panel = ({ children }: { children?: ReactNode }) =>
-    React.createElement("div", { "data-testid": "panel" }, children);
+  const Panel = ({
+    children,
+    className,
+    order,
+    style,
+  }: {
+    children?: ReactNode;
+    className?: string;
+    order?: number;
+    style?: CSSProperties;
+  }) =>
+    React.createElement(
+      "div",
+      { className, "data-panel-order": order, "data-testid": "panel", style },
+      children,
+    );
 
   return { Panel, PanelGroup };
 });
@@ -77,20 +103,36 @@ vi.mock("@bb/shared-ui/responsive-overlay", async () => {
 
   const ResponsiveDrawerShell = ({
     children,
+    contentClassName,
     onContentAnimationEnd,
+    onOpenChange,
     open,
+    srLabel,
   }: {
     children?: ReactNode;
+    contentClassName?: string;
     onContentAnimationEnd?: DrawerShellCallback;
+    onOpenChange?: (open: boolean) => void;
     open: boolean;
+    srLabel?: string;
   }) => {
     drawerShellState.onContentAnimationEnd = onContentAnimationEnd;
     return React.createElement(
       "div",
       {
+        "data-content-class-name": contentClassName,
         "data-open": String(open),
+        "data-sr-label": srLabel,
         "data-testid": "responsive-drawer-shell",
       },
+      React.createElement(
+        "button",
+        {
+          onClick: () => onOpenChange?.(false),
+          type: "button",
+        },
+        "Dismiss drawer",
+      ),
       children,
     );
   };
@@ -133,24 +175,155 @@ vi.mock(
       await importOriginal<
         typeof import("@/components/secondary-panel/ThreadSecondaryPanel")
       >();
+    const {
+      CONVERSATION_DRAWER_CONTROL_LABEL,
+      CONVERSATION_PENDING_INDICATOR_LABEL,
+      resolveWorkModeControl,
+    } = await import("@/components/secondary-panel/panelToggleControlState");
+
+    type FixtureProps = Pick<
+      ComponentProps<typeof actual.ThreadSecondaryPanel>,
+      | "browserDeck"
+      | "conversationDrawer"
+      | "inlinePanelToggle"
+      | "isOpen"
+      | "isWorkMode"
+      | "onToggleWorkMode"
+      | "renderAsDrawer"
+      | "resizablePanelLayout"
+      | "withoutResizablePanel"
+      | "workModeToggleId"
+    >;
 
     const ThreadSecondaryPanel = ({
       browserDeck,
+      conversationDrawer,
       inlinePanelToggle,
       isOpen,
+      isWorkMode,
+      onToggleWorkMode,
       renderAsDrawer,
+      resizablePanelLayout,
+      withoutResizablePanel,
+      workModeToggleId,
     }: ComponentProps<typeof actual.ThreadSecondaryPanel>) =>
-      React.createElement(
+      React.createElement(StatefulSecondaryPanelFixture, {
+        browserDeck,
+        conversationDrawer,
+        inlinePanelToggle,
+        isOpen,
+        isWorkMode,
+        onToggleWorkMode,
+        renderAsDrawer,
+        resizablePanelLayout,
+        withoutResizablePanel,
+        workModeToggleId,
+      });
+
+    function StatefulSecondaryPanelFixture({
+      browserDeck,
+      conversationDrawer,
+      inlinePanelToggle,
+      isOpen,
+      isWorkMode = false,
+      onToggleWorkMode,
+      renderAsDrawer,
+      resizablePanelLayout,
+      withoutResizablePanel = false,
+      workModeToggleId,
+    }: FixtureProps) {
+      const [activeResource, setActiveResource] = React.useState("notes.md");
+      // Mirror the real toolbar's accessible surface so the layout owner's
+      // wiring (ids, pressed/expanded state, pending indication) is observable
+      // here. Names come from the real module, not copies.
+      const workModeControl =
+        onToggleWorkMode === undefined
+          ? null
+          : resolveWorkModeControl({ isWorkMode, onToggleWorkMode });
+      return React.createElement(
         "section",
         {
           "data-open": String(isOpen),
           "data-inline-panel-toggle": inlinePanelToggle,
+          "data-panel-order": resizablePanelLayout?.panelOrder,
           "data-testid": renderAsDrawer
             ? "drawer-secondary-panel"
             : "inline-secondary-panel",
+          "data-without-resizable-panel": String(withoutResizablePanel),
+          style: { order: resizablePanelLayout?.visualOrder },
         },
+        conversationDrawer
+          ? React.createElement(
+              "div",
+              { key: "conversation-drawer-control" },
+              React.createElement(
+                "button",
+                {
+                  "aria-describedby": conversationDrawer.hasPendingInteraction
+                    ? conversationDrawer.pendingIndicatorId
+                    : undefined,
+                  "aria-expanded": conversationDrawer.isOpen,
+                  "aria-haspopup": "dialog",
+                  "aria-label": CONVERSATION_DRAWER_CONTROL_LABEL,
+                  "data-testid": "thread-conversation-drawer-toggle",
+                  onClick: conversationDrawer.onToggle,
+                  type: "button",
+                },
+                "Conversation",
+              ),
+              conversationDrawer.hasPendingInteraction
+                ? React.createElement(
+                    "span",
+                    {
+                      "data-testid": "thread-conversation-pending-indicator",
+                      id: conversationDrawer.pendingIndicatorId,
+                      role: "status",
+                    },
+                    CONVERSATION_PENDING_INDICATOR_LABEL,
+                  )
+                : null,
+            )
+          : null,
+        workModeControl
+          ? React.createElement(
+              "button",
+              {
+                "aria-label": workModeControl.label,
+                "aria-pressed": workModeControl.isPressed,
+                "data-testid": "thread-work-mode-toggle",
+                disabled: workModeControl.disabled,
+                id: workModeToggleId,
+                key: "work-mode-control",
+                onClick: workModeControl.onClick,
+                type: "button",
+              },
+              workModeControl.label,
+            )
+          : null,
+        React.createElement(
+          "button",
+          {
+            onClick: () => setActiveResource("preview.pdf"),
+            type: "button",
+          },
+          "Open preview",
+        ),
+        React.createElement(
+          "button",
+          {
+            onClick: () => setActiveResource("docs"),
+            type: "button",
+          },
+          "Open docs",
+        ),
+        React.createElement(
+          "div",
+          { "data-testid": "active-resource" },
+          activeResource,
+        ),
         browserDeck,
       );
+    }
 
     return { ...actual, ThreadSecondaryPanel };
   },
@@ -161,12 +334,18 @@ vi.mock("./ThreadTimelinePane", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./ThreadTimelinePane")>();
 
   const ThreadTimelinePane = ({
+    footer,
     threadId,
   }: ComponentProps<typeof actual.ThreadTimelinePane>) =>
-    React.createElement("div", {
-      "data-testid": "thread-timeline-pane",
-      "data-thread-id": threadId,
-    });
+    React.createElement(
+      "div",
+      {
+        "data-testid": "thread-timeline-pane",
+        "data-thread-id": threadId,
+        tabIndex: -1,
+      },
+      footer,
+    );
 
   return { ...actual, ThreadTimelinePane };
 });
@@ -179,9 +358,14 @@ interface QueuedAnimationFrames {
 }
 
 interface RenderThreadDetailArgs {
+  arrangement?: ThreadSurfaceArrangement;
+  canEnterWorkMode?: boolean;
+  hasPendingInteraction?: boolean;
   isFocusedHosted?: boolean;
   isCompactViewport: boolean;
   isSecondaryPanelOpen: boolean;
+  isWorkMode?: boolean;
+  onToggleWorkMode?: () => void;
   renderBrowserDeck: RenderBrowserDeck;
   threadId: string;
 }
@@ -221,6 +405,7 @@ function ThreadDetailTestPaneProvider({
     onRequestClose: noop,
     isMaximized: false,
     onToggleMaximize: noop,
+    setWorkModeMaximized: null,
     isBoundedPane: true,
     isTopRow: true,
     ownsWindowTopLeft: true,
@@ -312,8 +497,24 @@ function createBrowserDeckRenderer(order?: string[]): RenderBrowserDeck {
   });
 }
 
+function StatefulConversationHeader() {
+  return (
+    <div data-testid="header">
+      <label>
+        Draft
+        <input aria-label="Draft" defaultValue="unfinished prompt" />
+      </label>
+    </div>
+  );
+}
+
 function createProps({
+  arrangement = "conversation-primary",
+  canEnterWorkMode = true,
+  hasPendingInteraction = false,
   isSecondaryPanelOpen,
+  isWorkMode = false,
+  onToggleWorkMode = noop,
   renderBrowserDeck,
   threadId,
 }: Omit<
@@ -322,9 +523,10 @@ function createProps({
 >): ThreadDetailSecondaryContentProps {
   return {
     footer: <div data-testid="footer" />,
-    header: <div data-testid="header" />,
+    hasPendingInteraction,
+    header: <StatefulConversationHeader />,
     isBoundedPane: false,
-    isConversationCollapsed: false,
+    isWorkMode,
     isMetadataLoading: false,
     isSecondaryPanelOpen,
     metadata: {
@@ -351,11 +553,12 @@ function createProps({
       workspaceStatus: undefined,
       workspaceStatusError: null,
     } as ThreadDetailSecondaryContentProps["metadata"],
-    onToggleConversationCollapse: noop,
     onToggleSecondaryPanel: noop,
+    onToggleWorkMode,
     renderHostedPanel: (panel) => panel,
     secondaryPanel: {
       activeTab: null,
+      canEnterWorkMode,
       canUseGitUi: false,
       fileTabs: [],
       isBrowserTabActive: true,
@@ -369,6 +572,7 @@ function createProps({
       renderBrowserDeck,
       showGitDiffTab: false,
     },
+    surfaceArrangement: arrangement,
     timeline: {
       activeThinking: null,
       hasOlderTimelineRows: false,
@@ -400,7 +604,12 @@ function renderThreadDetail(args: RenderThreadDetailArgs) {
       >
         <ThreadDetailSecondaryContent
           {...createProps({
+            arrangement: renderArgs.arrangement,
+            canEnterWorkMode: renderArgs.canEnterWorkMode,
+            hasPendingInteraction: renderArgs.hasPendingInteraction,
             isSecondaryPanelOpen: renderArgs.isSecondaryPanelOpen,
+            isWorkMode: renderArgs.isWorkMode,
+            onToggleWorkMode: renderArgs.onToggleWorkMode,
             renderBrowserDeck: renderArgs.renderBrowserDeck,
             threadId: renderArgs.threadId,
           })}
@@ -422,7 +631,12 @@ function renderThreadDetail(args: RenderThreadDetailArgs) {
           >
             <ThreadDetailSecondaryContent
               {...createProps({
+                arrangement: renderArgs.arrangement,
+                canEnterWorkMode: renderArgs.canEnterWorkMode,
+                hasPendingInteraction: renderArgs.hasPendingInteraction,
                 isSecondaryPanelOpen: renderArgs.isSecondaryPanelOpen,
+                isWorkMode: renderArgs.isWorkMode,
+                onToggleWorkMode: renderArgs.onToggleWorkMode,
                 renderBrowserDeck: renderArgs.renderBrowserDeck,
                 threadId: renderArgs.threadId,
               })}
@@ -507,6 +721,48 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
     ).toBe("button");
   });
 
+  /**
+   * Work mode is the only presentation state, and a hosted pane whose panel
+   * holds only ineligible tabs cannot enter it — so that pane's toolbar shows
+   * no presentation control at all. The host still offers "Hide right panel",
+   * so the panel is not stranded.
+   */
+  it("shows no presentation control in a hosted pane with no eligible work surface", () => {
+    renderThreadDetail({
+      canEnterWorkMode: false,
+      isCompactViewport: false,
+      isFocusedHosted: true,
+      isSecondaryPanelOpen: true,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+
+    if (publishedHostedPanel === null) {
+      throw new Error("Expected the focused pane to publish its panel model");
+    }
+    render(<>{publishedHostedPanel.panel}</>);
+    expect(screen.queryByTestId("thread-work-mode-toggle")).toBeNull();
+  });
+
+  it("keeps the presentation control in a hosted pane that can enter Work mode", () => {
+    renderThreadDetail({
+      canEnterWorkMode: true,
+      isCompactViewport: false,
+      isFocusedHosted: true,
+      isSecondaryPanelOpen: true,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+
+    if (publishedHostedPanel === null) {
+      throw new Error("Expected the focused pane to publish its panel model");
+    }
+    render(<>{publishedHostedPanel.panel}</>);
+    expect(
+      screen.getByTestId("thread-work-mode-toggle").getAttribute("aria-label"),
+    ).toBe("Enter Work mode");
+  });
+
   it("keeps the thread header inside the timeline column beside the side panel", () => {
     renderThreadDetail({
       isCompactViewport: false,
@@ -522,6 +778,182 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
     expect(timelinePanel.contains(sidePanel)).toBe(false);
     expect(panelGroup.contains(timelinePanel)).toBe(true);
     expect(panelGroup.contains(sidePanel)).toBe(true);
+  });
+
+  /**
+   * Entering Work mode animates the timeline panel down to the conversation
+   * rail width. That size change is decorative — both modes settle at the same
+   * layout — so it must drop out under `prefers-reduced-motion`. The drawer
+   * half of the same requirement lives in vaul's markup and is covered in
+   * `src/components/ui/drawer.reducedMotion.test.tsx`.
+   */
+  it("suppresses the Work mode size transition under reduced motion", () => {
+    renderThreadDetail({
+      isCompactViewport: false,
+      isSecondaryPanelOpen: true,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+
+    const timelinePanel = screen.getByTestId("panel");
+    expect(timelinePanel.className).toContain(
+      "transition-[flex-grow,flex-basis]",
+    );
+    expect(timelinePanel.className).toContain("motion-reduce:transition-none");
+  });
+
+  it("does not promote when a resource opens in Conversation mode", () => {
+    const pushState = vi.spyOn(window.history, "pushState");
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const view = renderThreadDetail({
+      arrangement: "conversation-primary",
+      isCompactViewport: false,
+      isSecondaryPanelOpen: false,
+      isWorkMode: false,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+
+    expect(
+      screen
+        .getByTestId("panel")
+        .closest("[data-thread-mode]")
+        ?.getAttribute("data-thread-mode"),
+    ).toBe("conversation");
+
+    view.rerenderWith({ isSecondaryPanelOpen: true });
+
+    expect(
+      screen
+        .getByTestId("panel")
+        .closest("[data-thread-mode]")
+        ?.getAttribute("data-thread-mode"),
+    ).toBe("conversation");
+    expect(screen.getByTestId("panel").style.order).toBe("1");
+    expect(screen.getByTestId("inline-secondary-panel").style.order).toBe("3");
+    expect(pushState).not.toHaveBeenCalled();
+    expect(replaceState).not.toHaveBeenCalled();
+  });
+
+  it("preserves real Thread region state and focus across Conversation and Work mode", () => {
+    const pushState = vi.spyOn(window.history, "pushState");
+    const replaceState = vi.spyOn(window.history, "replaceState");
+    const view = renderThreadDetail({
+      arrangement: "conversation-primary",
+      isCompactViewport: false,
+      isSecondaryPanelOpen: true,
+      isWorkMode: false,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+    const conversation = screen
+      .getByTestId("thread-timeline-pane")
+      .closest('[data-thread-region="conversation"]');
+    const workSurface = screen.getByTestId("inline-secondary-panel");
+    const draft = screen.getByRole("textbox", { name: "Draft" });
+    const timeline = screen.getByTestId("thread-timeline-pane");
+
+    if (conversation === null) {
+      throw new Error("Expected the stable conversation region");
+    }
+    fireEvent.change(draft, { target: { value: "edited draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open preview" }));
+    timeline.scrollTop = 240;
+    draft.focus();
+
+    view.rerenderWith({
+      arrangement: "work-surface-primary",
+      isWorkMode: true,
+    });
+
+    const preservedDraft = screen.getByRole("textbox", { name: "Draft" });
+    expect(screen.getAllByTestId("thread-timeline-pane")).toHaveLength(1);
+    expect(screen.getAllByTestId("inline-secondary-panel")).toHaveLength(1);
+    expect(
+      screen
+        .getByTestId("thread-timeline-pane")
+        .closest('[data-thread-region="conversation"]'),
+    ).toBe(conversation);
+    expect(screen.getByTestId("inline-secondary-panel")).toBe(workSurface);
+    expect(preservedDraft).toBeInstanceOf(HTMLInputElement);
+    if (!(preservedDraft instanceof HTMLInputElement)) {
+      throw new Error("Expected the draft control to be an input");
+    }
+    expect(preservedDraft.value).toBe("edited draft");
+    expect(screen.getByTestId("thread-timeline-pane").scrollTop).toBe(240);
+    expect(screen.getByTestId("active-resource").textContent).toBe(
+      "preview.pdf",
+    );
+    expect(document.activeElement).toBe(preservedDraft);
+    expect(screen.getByTestId("panel").style.order).toBe("3");
+    expect(screen.getByTestId("inline-secondary-panel").style.order).toBe("1");
+    expect(
+      screen
+        .getByTestId("panel")
+        .closest("[data-thread-mode]")
+        ?.getAttribute("data-thread-mode"),
+    ).toBe("work");
+    expect(screen.getByTestId("header")).not.toBeNull();
+    expect(screen.getByTestId("footer")).not.toBeNull();
+    expect(conversation.contains(screen.getByTestId("header"))).toBe(true);
+    expect(conversation.contains(screen.getByTestId("footer"))).toBe(true);
+    expect(pushState).not.toHaveBeenCalled();
+    expect(replaceState).not.toHaveBeenCalled();
+
+    view.rerenderWith({
+      arrangement: "conversation-primary",
+      isWorkMode: false,
+    });
+
+    expect(
+      screen
+        .getByTestId("thread-timeline-pane")
+        .closest('[data-thread-region="conversation"]'),
+    ).toBe(conversation);
+    expect(screen.getByTestId("inline-secondary-panel")).toBe(workSurface);
+    expect(document.activeElement).toBe(preservedDraft);
+    expect(
+      screen
+        .getByTestId("panel")
+        .closest("[data-thread-mode]")
+        ?.getAttribute("data-thread-mode"),
+    ).toBe("conversation");
+    expect(pushState).not.toHaveBeenCalled();
+    expect(replaceState).not.toHaveBeenCalled();
+  });
+
+  it("keeps conversation, work-surface host, and browser deck mounted while switching tabs in Work mode", () => {
+    renderThreadDetail({
+      arrangement: "work-surface-primary",
+      isCompactViewport: false,
+      isSecondaryPanelOpen: true,
+      isWorkMode: true,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+    const conversation = screen
+      .getByTestId("thread-timeline-pane")
+      .closest('[data-thread-region="conversation"]');
+    const workSurface = screen.getByTestId("inline-secondary-panel");
+    const browserDeck = screen.getByTestId("browser-deck");
+
+    if (conversation === null) {
+      throw new Error("Expected the stable conversation region");
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Open docs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open preview" }));
+
+    expect(screen.getByTestId("active-resource").textContent).toBe(
+      "preview.pdf",
+    );
+    expect(
+      screen
+        .getByTestId("thread-timeline-pane")
+        .closest('[data-thread-region="conversation"]'),
+    ).toBe(conversation);
+    expect(screen.getByTestId("inline-secondary-panel")).toBe(workSurface);
+    expect(screen.getByTestId("browser-deck")).toBe(browserDeck);
   });
 
   it("hides and restores native browser readiness as hosted pane focus changes", () => {
@@ -778,5 +1210,233 @@ describe("ThreadDetailSecondaryContent compact drawer settling", () => {
       canShowNativeBrowserView: true,
     });
     expect(dispatchBrowserViewBoundsSync).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ThreadDetailSecondaryContent compact Work mode", () => {
+  function renderCompactWorkMode(
+    overrides: Partial<RenderThreadDetailArgs> = {},
+  ) {
+    return renderThreadDetail({
+      arrangement: "work-surface-primary",
+      isCompactViewport: true,
+      isSecondaryPanelOpen: true,
+      isWorkMode: true,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+      ...overrides,
+    });
+  }
+
+  function drawerShell() {
+    return screen.getByTestId("responsive-drawer-shell");
+  }
+
+  it("inverts the drawer: the work surface takes the page and the conversation takes the drawer", () => {
+    renderCompactWorkMode();
+
+    const workSurface = screen.getByTestId("inline-secondary-panel");
+    // No PanelGroup on the page: there is nothing beside the work surface to
+    // resize against, so it must not ask for a resizable Panel wrapper either.
+    expect(screen.queryByTestId("panel-group")).toBeNull();
+    expect(screen.queryByTestId("panel")).toBeNull();
+    expect(workSurface.getAttribute("data-without-resizable-panel")).toBe(
+      "true",
+    );
+    expect(screen.queryByTestId("drawer-secondary-panel")).toBeNull();
+    expect(drawerShell().contains(workSurface)).toBe(false);
+
+    // The complete conversation — header, timeline, and composer footer — is
+    // what the drawer now holds, and it is closed until the user asks for it.
+    const conversation = screen
+      .getByTestId("thread-timeline-pane")
+      .closest('[data-thread-region="conversation"]');
+    if (conversation === null) {
+      throw new Error("Expected the stable conversation region");
+    }
+    expect(drawerShell().contains(conversation)).toBe(true);
+    expect(conversation.contains(screen.getByTestId("header"))).toBe(true);
+    expect(conversation.contains(screen.getByTestId("footer"))).toBe(true);
+    expect(drawerShell().getAttribute("data-open")).toBe("false");
+    expect(drawerShell().getAttribute("data-sr-label")).toBe("Conversation");
+    expect(
+      workSurface
+        .closest("[data-thread-mode]")
+        ?.getAttribute("data-thread-mode"),
+    ).toBe("work");
+  });
+
+  it("opens and closes the conversation drawer without leaving Work mode", () => {
+    renderCompactWorkMode();
+
+    const control = screen.getByRole("button", {
+      name: CONVERSATION_DRAWER_CONTROL_LABEL,
+    });
+    expect(control.getAttribute("aria-expanded")).toBe("false");
+    expect(control.getAttribute("aria-haspopup")).toBe("dialog");
+
+    fireEvent.click(control);
+
+    expect(drawerShell().getAttribute("data-open")).toBe("true");
+    expect(
+      screen
+        .getByRole("button", { name: CONVERSATION_DRAWER_CONTROL_LABEL })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByTestId("inline-secondary-panel")
+        .closest("[data-thread-mode]")
+        ?.getAttribute("data-thread-mode"),
+    ).toBe("work");
+
+    // Dismissing the sheet itself (swipe/scrim/Escape all land on onOpenChange)
+    // must close only the drawer — the work surface keeps the page.
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss drawer" }));
+
+    expect(drawerShell().getAttribute("data-open")).toBe("false");
+    expect(screen.getByTestId("inline-secondary-panel")).not.toBeNull();
+    expect(screen.queryByTestId("panel-group")).toBeNull();
+    expect(
+      screen
+        .getByTestId("inline-secondary-panel")
+        .closest("[data-thread-mode]")
+        ?.getAttribute("data-thread-mode"),
+    ).toBe("work");
+    expect(
+      screen
+        .getByRole("button", { name: CONVERSATION_DRAWER_CONTROL_LABEL })
+        .getAttribute("aria-expanded"),
+    ).toBe("false");
+  });
+
+  it("indicates a waiting approval or question on the closed drawer control without opening it", () => {
+    const view = renderCompactWorkMode({ hasPendingInteraction: false });
+
+    expect(
+      screen.queryByTestId("thread-conversation-pending-indicator"),
+    ).toBeNull();
+
+    view.rerenderWith({ hasPendingInteraction: true });
+
+    const indicator = screen.getByTestId(
+      "thread-conversation-pending-indicator",
+    );
+    expect(indicator.getAttribute("role")).toBe("status");
+    expect(indicator.textContent).toBe(CONVERSATION_PENDING_INDICATOR_LABEL);
+    // The control points at its own pane's indicator, so a second pane in the
+    // same document cannot capture the reference.
+    expect(indicator.id).toBe(
+      resolveConversationPendingIndicatorElementId("main"),
+    );
+    expect(
+      screen
+        .getByTestId("thread-conversation-drawer-toggle")
+        .getAttribute("aria-describedby"),
+    ).toBe(indicator.id);
+    // The indicator is the whole response: the drawer never opens on its own.
+    expect(drawerShell().getAttribute("data-open")).toBe("false");
+
+    // It persists while the interaction is unresolved, including once the user
+    // has opened and dismissed the drawer.
+    fireEvent.click(
+      screen.getByRole("button", { name: CONVERSATION_DRAWER_CONTROL_LABEL }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss drawer" }));
+    expect(
+      screen.getByTestId("thread-conversation-pending-indicator").textContent,
+    ).toBe(CONVERSATION_PENDING_INDICATOR_LABEL);
+    expect(drawerShell().getAttribute("data-open")).toBe("false");
+  });
+
+  it("keeps keyboard focus on the Work mode control across promotion and restoration", () => {
+    const frames = installAnimationFrameQueue();
+    const view = renderThreadDetail({
+      isCompactViewport: true,
+      isSecondaryPanelOpen: true,
+      isWorkMode: false,
+      renderBrowserDeck: createBrowserDeckRenderer(),
+      threadId: "thread-1",
+    });
+    // The compact panel drawer is where the user enters Work mode; its content
+    // mounts once the sheet has settled and the settle frame has run.
+    scheduleCompactDrawerSettleFrame();
+    act(() => {
+      frames.flushAll();
+    });
+
+    const enterControl = screen.getByTestId("thread-work-mode-toggle");
+    expect(enterControl.getAttribute("aria-label")).toBe("Enter Work mode");
+    expect(enterControl.getAttribute("aria-pressed")).toBe("false");
+    enterControl.focus();
+    expect(document.activeElement).toBe(enterControl);
+
+    view.rerenderWith({
+      arrangement: "work-surface-primary",
+      isWorkMode: true,
+    });
+
+    // Promotion moved the surface out of the drawer portal and onto the page,
+    // remounting the control. Focus follows it rather than falling to <body>.
+    const restoreControl = screen.getByTestId("thread-work-mode-toggle");
+    expect(restoreControl).not.toBe(enterControl);
+    expect(restoreControl.getAttribute("aria-label")).toBe(
+      "Restore Conversation",
+    );
+    expect(restoreControl.getAttribute("aria-pressed")).toBe("true");
+    expect(document.activeElement).toBe(restoreControl);
+    // Both states are the same control, so the id is stable across the swap.
+    expect(restoreControl.id).toBe(enterControl.id);
+    expect(restoreControl.id).not.toBe("");
+
+    view.rerenderWith({
+      arrangement: "conversation-primary",
+      isWorkMode: false,
+    });
+
+    const restoredEnterControl = screen.getByTestId("thread-work-mode-toggle");
+    expect(restoredEnterControl.getAttribute("aria-pressed")).toBe("false");
+    expect(document.activeElement).toBe(restoredEnterControl);
+  });
+
+  it("leaves focus alone when the user has already moved on", () => {
+    const view = renderCompactWorkMode();
+    const drawerControl = screen.getByRole("button", {
+      name: CONVERSATION_DRAWER_CONTROL_LABEL,
+    });
+    drawerControl.focus();
+
+    view.rerenderWith({ hasPendingInteraction: true });
+
+    expect(document.activeElement).toBe(drawerControl);
+  });
+
+  it("closes the conversation drawer when Work mode ends", () => {
+    const view = renderCompactWorkMode();
+    fireEvent.click(
+      screen.getByRole("button", { name: CONVERSATION_DRAWER_CONTROL_LABEL }),
+    );
+    expect(drawerShell().getAttribute("data-open")).toBe("true");
+
+    view.rerenderWith({
+      arrangement: "conversation-primary",
+      isWorkMode: false,
+    });
+
+    // Back to the ordinary compact layout: the one drawer on the page is the
+    // panel drawer again, closed, with the conversation on the page.
+    expect(
+      screen.queryByTestId("thread-conversation-drawer-toggle"),
+    ).toBeNull();
+    expect(screen.getByTestId("panel-group")).not.toBeNull();
+
+    view.rerenderWith({
+      arrangement: "work-surface-primary",
+      isWorkMode: true,
+    });
+
+    // Re-entering does not restore the previous open state, and nothing opens
+    // the drawer except its own control.
+    expect(drawerShell().getAttribute("data-open")).toBe("false");
   });
 });

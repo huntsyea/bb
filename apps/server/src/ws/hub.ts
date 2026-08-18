@@ -24,9 +24,11 @@ import {
   terminalServerMessageSchema,
   threadOpenSignalSchema,
   threadPaneActionSignalSchema,
+  threadWorkModeSignalSchema,
   type ThreadPaneAction,
   type ThreadOpenFile,
   type ThreadOpenSplit,
+  type ThreadWorkModeAction,
   type TerminalServerMessage,
 } from "@bb/server-contract";
 
@@ -767,6 +769,27 @@ export class NotificationHub implements DbNotifier {
     const payload = JSON.stringify(
       threadPaneActionSignalSchema.parse({
         type: "thread-pane-action",
+        projectId: thread.projectId,
+        threadId: thread.threadId,
+        action,
+      }),
+    );
+    let delivered = 0;
+    for (const socket of this.clientKeysBySocket.keys()) {
+      socket.send(payload);
+      delivered += 1;
+    }
+    return delivered;
+  }
+
+  /** Broadcast an ephemeral Work mode transition request to every app client. */
+  notifyThreadWorkMode(
+    thread: { projectId: string; threadId: string },
+    action: ThreadWorkModeAction,
+  ): number {
+    const payload = JSON.stringify(
+      threadWorkModeSignalSchema.parse({
+        type: "thread-work-mode",
         projectId: thread.projectId,
         threadId: thread.threadId,
         action,

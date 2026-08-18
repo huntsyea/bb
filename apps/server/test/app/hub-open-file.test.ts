@@ -63,4 +63,27 @@ describe("NotificationHub.notifyThreadOpen", () => {
       });
     }
   });
+
+  it("broadcasts typed thread work-mode actions to every connected client", () => {
+    const hub = new NotificationHub();
+    const first = createMockHubSocket();
+    const second = createMockHubSocket();
+    hub.registerClient(first);
+    hub.registerClient(second);
+
+    expect(
+      hub.notifyThreadWorkMode(
+        { projectId: "proj_1", threadId: "thr_1" },
+        "enter",
+      ),
+    ).toBe(2);
+    for (const socket of [first, second]) {
+      expect(JSON.parse(socket.messages[0]!)).toEqual({
+        type: "thread-work-mode",
+        projectId: "proj_1",
+        threadId: "thr_1",
+        action: "enter",
+      });
+    }
+  });
 });

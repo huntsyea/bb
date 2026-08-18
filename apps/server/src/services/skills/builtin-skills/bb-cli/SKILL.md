@@ -395,6 +395,13 @@ For review or fix pipelines, get the environment ID from
   `sdk.threads.paneAction({ threadId, action })`.
 - Users can also toggle the focused pane from its header or with the configurable
   `pane.maximize.toggle` app command (default `Mod+Shift+E`).
+- Use `bb thread work-mode enter|exit|toggle [thread-id]` to switch Work mode
+  in every connected BB app window where the thread is open. Inside a BB
+  thread, omit the id to use `BB_THREAD_ID`. The command reports how many
+  connected clients received the ephemeral action, not how many applied it —
+  a client only applies it when the thread is open there and has an eligible
+  work surface (a file, diff, or other content tab) to promote. The SDK
+  equivalent is `sdk.threads.experimental_workMode({ threadId, action })`.
 
 ## Files And Voice
 

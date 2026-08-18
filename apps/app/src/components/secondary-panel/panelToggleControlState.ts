@@ -1,7 +1,7 @@
 export type PanelToggleAction =
   | "show-panel"
-  | "enter-full-screen"
-  | "exit-full-screen";
+  | "enter-work-mode"
+  | "restore-conversation";
 
 /**
  * Icon names the toggle can render. A subset of the Icon component's `IconName`
@@ -13,48 +13,38 @@ interface PanelToggleActionPresentation {
   label: string;
   iconName: PanelToggleIconName;
   /**
-   * Whether the action is currently presenting the panel in full-screen mode.
-   * This drives the toggle button's `aria-pressed` state.
+   * Whether the action is currently presenting Work mode. This drives
+   * `aria-pressed`.
    */
-  isFullScreen: boolean;
+  isPressed: boolean;
 }
 
 /**
- * The single source of truth for each action's copy, icon, and disclosure
- * state. Both the conversation-header "show panel" button and the in-panel
- * collapse toggle resolve their presentation from here, so the two surfaces
- * stay in lockstep:
- *
- *   show-panel           → open the panel. Renders the PanelRight icon so it
- *                          reads as "open the right side panel" — matching the
- *                          in-panel hide button. Lives in the conversation
- *                          header, only while the panel is closed.
- *   enter-full-screen    → expand the right panel to fill the content area.
- *   exit-full-screen     → restore the previous thread-and-panel layout.
- * Both actions stay in the panel header so the control transforms in place.
+ * Shared copy and icons for the conversation-header and in-panel toggles.
  */
 const PANEL_TOGGLE_ACTION_PRESENTATION = {
   "show-panel": {
     label: "Show right panel",
     iconName: "PanelRight",
-    isFullScreen: false,
+    isPressed: false,
   },
-  "enter-full-screen": {
-    label: "Full Screen",
+  "enter-work-mode": {
+    label: "Enter Work mode",
     iconName: "Maximize2",
-    isFullScreen: false,
+    isPressed: false,
   },
-  "exit-full-screen": {
-    label: "Exit Full Screen",
+  "restore-conversation": {
+    label: "Restore Conversation",
     iconName: "Minimize2",
-    isFullScreen: true,
+    isPressed: true,
   },
 } as const satisfies Record<PanelToggleAction, PanelToggleActionPresentation>;
 
 export interface PanelToggleControlState {
   action: PanelToggleAction;
+  disabled?: boolean;
   label: string;
-  isFullScreen: boolean;
+  isPressed: boolean;
   iconName: PanelToggleIconName;
   onClick: () => void;
 }
@@ -66,7 +56,7 @@ export interface ResolveShowPanelControlArgs {
 /**
  * The conversation header's panel affordance, used only while the secondary
  * panel is closed: a button that opens it. Once the panel is open the toggle
- * moves into the panel header (see {@link resolveConversationCollapseControl}).
+ * moves into the panel header (see {@link resolveWorkModeControl}).
  */
 export function resolveShowPanelControl({
   onToggleSecondaryPanel,
@@ -78,26 +68,54 @@ export function resolveShowPanelControl({
   };
 }
 
-export interface ResolveConversationCollapseControlArgs {
-  isConversationCollapsed: boolean;
-  onToggleConversationCollapse: () => void;
+/**
+ * Compact Work mode moves the conversation into a drawer. The control's name
+ * stays stable across open and closed — `aria-expanded` carries the state, so
+ * a name that flipped between "Show" and "Hide" would only duplicate it.
+ */
+export const CONVERSATION_DRAWER_CONTROL_LABEL = "Conversation";
+
+/**
+ * Persistent indication that an approval or a question is waiting in the
+ * closed conversation drawer. The drawer never opens on its own.
+ */
+export const CONVERSATION_PENDING_INDICATOR_LABEL =
+  "Conversation needs your response";
+
+/**
+ * Ties the indicator to the drawer control via `aria-describedby`, so the
+ * control itself reports the waiting interaction. Scoped by pane like the Work
+ * mode toggle's id, so the reference stays unambiguous if a layout ever renders
+ * two panes at once.
+ */
+export function resolveConversationPendingIndicatorElementId(
+  paneId: string,
+): string {
+  return `thread-conversation-pending-indicator-${paneId}`;
+}
+
+export interface ResolveWorkModeControlArgs {
+  canEnterWorkMode?: boolean;
+  isWorkMode: boolean;
+  onToggleWorkMode: () => void;
 }
 
 /**
- * Resolves the paired conversation disclosure states. One control in the panel
- * header renders both: it expands the panel while the conversation is visible,
- * and restores the conversation while the panel owns the full canvas.
+ * One transforming control in the work-surface toolbar. Enter promotes the
+ * existing work surface; restore returns to Conversation mode.
  */
-export function resolveConversationCollapseControl({
-  isConversationCollapsed,
-  onToggleConversationCollapse,
-}: ResolveConversationCollapseControlArgs): PanelToggleControlState {
-  const action: PanelToggleAction = isConversationCollapsed
-    ? "exit-full-screen"
-    : "enter-full-screen";
+export function resolveWorkModeControl({
+  canEnterWorkMode = true,
+  isWorkMode,
+  onToggleWorkMode,
+}: ResolveWorkModeControlArgs): PanelToggleControlState {
+  const action: PanelToggleAction = isWorkMode
+    ? "restore-conversation"
+    : "enter-work-mode";
   return {
     action,
     ...PANEL_TOGGLE_ACTION_PRESENTATION[action],
-    onClick: onToggleConversationCollapse,
+    disabled: !isWorkMode && !canEnterWorkMode,
+    onClick: onToggleWorkMode,
   };
 }
